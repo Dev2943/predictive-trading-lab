@@ -1,0 +1,30 @@
+build/
+.cache/
+compile_commands.json
+.DS_Store
+.idea/
+.vscode/
+
+# ---------------------------------------------------------------------------
+# VENDOR DATA MUST NEVER BE COMMITTED (ADR-0001, data licensing policy).
+# Ingestion code, manifests, checksums and tiny synthetic fixtures only.
+# Enforced additionally by .github/workflows/ci.yml (raw-data guard).
+# ---------------------------------------------------------------------------
+data/raw/**
+data/normalized/**
+data/cache/**
+!data/raw/.gitkeep
+!data/normalized/.gitkeep
+!data/cache/.gitkeep
+!data/**/MANIFEST.toml
+!data/**/*.sha256
+
+*.dbn
+*.dbn.zst
+*.parquet
+*.tsb
+
+results/**
+!results/.gitkeep
+*.sqlite
+*.sqlite-journal
