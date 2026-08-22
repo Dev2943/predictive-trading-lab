@@ -1,0 +1,198 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Policy guards. These run first and are cheap: a licensing or point-in-time
+  # violation should fail in seconds, not after a full build matrix.
+  # ---------------------------------------------------------------------------
+  guards:
+    name: policy guards
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: No vendor data in the repository (ADR-0001 licensing policy)
+        run: |
+          # Ingestion code, manifests, checksums and tiny synthetic fixtures are
+          # allowed. Raw vendor payloads are not, under any circumstances.
+          bad=$(git ls-files \
+            'data/raw/**' 'data/normalized/**' 'data/cache/**' \
+            '*.dbn' '*.dbn.zst' '*.parquet' '*.tsb' \
+            | grep -v -E '(\.gitkeep|MANIFEST\.toml|\.sha256)$' || true)
+          if [ -n "$bad" ]; then
+            echo "::error::Vendor data files are committed:"; echo "$bad"; exit 1
+          fi
+          echo "clean: no vendor data tracked"
+
+      - name: No runtime time-zone dependency (ADR-0001 Addendum A1)
+        run: |
+          # libc++ lacks the C++20 tzdb, and depending on the host zone database
+          # would break bit-reproducibility across machines. Sessions are loaded
+          # as precomputed UTC instants instead.
+          # strip_comments: the guards must not fire on the documentation that
+          # explains why the thing is forbidden.
+          hits=$(grep -rnE 'zoned_time|std::chrono::tzdb|current_zone|locate_zone' \
+                   include/ src/ apps/ 2>/dev/null \
+                 | grep -vE ':[0-9]+: *(//|/\*|\*)' \
+                 | grep -v 'PTL_HAS_CHRONO_TZDB' || true)
+          if [ -n "$hits" ]; then
+            echo "::error::Runtime time-zone usage found:"; echo "$hits"; exit 1
+          fi
+          echo "clean: engine is UTC-only"
+
+      - name: No queue-position claims (ADR-0001 honest project claim)
+        run: |
+          # Sampled top-of-book data cannot establish queue position. If a field
+          # by that name ever appears, either the claim or the code is wrong.
+          hits=$(grep -rniE 'queue_position|queue_pos\b' include/ src/ apps/ 2>/dev/null \
+                 | grep -vE ':[0-9]+: *(//|///|/\*|\*)' || true)
+          if [ -n "$hits" ]; then
+            echo "::error::Queue-position symbol found:"; echo "$hits"; exit 1
+          fi
+          echo "clean: no queue-position claim"
+
+      - name: No <random> distributions (cross-platform determinism)
+        run: |
+          # These are specified by their statistical properties, not by the
+          # sequence they emit; libstdc++ and libc++ genuinely differ. Results
+          # generated on macOS would not reproduce on Linux.
+          hits=$(grep -rnE 'uniform_(real|int)_distribution|normal_distribution|std::rand\(' \
+                   include/ src/ apps/ 2>/dev/null \
+                 | grep -vE ':[0-9]+: *(//|///|/\*|\*)' || true)
+          if [ -n "$hits" ]; then
+            echo "::error::<random> distribution used:"; echo "$hits"; exit 1
+          fi
+          echo "clean: RNG sequence is ours"
+
+      - name: clang-format
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y clang-format
+          # Parentheses matter: without them -o binds as
+          #   (include ... -name '*.hpp') -o (-name '*.cpp')
+          # which silently checks a different set of files than intended.
+          # -print0/-0 handles paths containing spaces.
+          find include src apps tests benchmarks \
+               \( -name '*.hpp' -o -name '*.cpp' \) -print0 \
+            | xargs -0 clang-format --dry-run --Werror
+
+  build:
+    name: ${{ matrix.name }}
+    needs: guards
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: "macOS AppleClang",  os: macos-latest,  preset: macos-release }
+          - { name: "macOS Debug+Trace", os: macos-latest,  preset: macos-debug }
+          - { name: "Linux GCC",         os: ubuntu-latest, preset: linux-gcc-release }
+          - { name: "Linux Clang",       os: ubuntu-latest, preset: linux-clang-debug }
+          - { name: "ASan + UBSan",      os: ubuntu-latest, preset: asan-ubsan }
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }   # git describe needs history for the RunId
+
+      - name: Install toolchain (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y ninja-build libsqlite3-dev
+
+      - name: Install toolchain (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja
+
+      - name: Configure
+        run: cmake --preset ${{ matrix.preset }}
+
+      - name: Build
+        run: cmake --build --preset ${{ matrix.preset }}
+
+      - name: Test
+        env:
+          ASAN_OPTIONS: detect_leaks=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: ctest --preset ${{ matrix.preset }}
+
+  portability:
+    name: ${{ matrix.name }}
+    needs: guards
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The Result fallback is what an older Xcode lands on. An untested
+          # fallback fails only on the machine that needed it, which is by
+          # definition the machine you cannot debug -- so compile it every time.
+          - { name: "Result fallback (no std::expected)", os: macos-latest,
+              flags: "-DPTL_FORCE_RESULT_FALLBACK=ON" }
+          - { name: "Result fallback (Linux)", os: ubuntu-latest,
+              flags: "-DPTL_FORCE_RESULT_FALLBACK=ON" }
+          # C++20 is the stated baseline. Prove nothing has quietly started
+          # requiring C++23.
+          - { name: "C++20 baseline (macOS)", os: macos-latest,
+              flags: "-DCMAKE_CXX_STANDARD=20" }
+          - { name: "C++20 baseline (Linux)", os: ubuntu-latest,
+              flags: "-DCMAKE_CXX_STANDARD=20" }
+          # libc++ on Linux, as a fast proxy for AppleClang.
+          #
+          # The macOS jobs above already exercise libc++, but they queue slowly
+          # and the failure mode is a compile error, not a test failure -- the
+          # kind of thing you want back in two minutes. std::chrono in
+          # particular diverges: system_clock::duration is microseconds on
+          # libc++ and nanoseconds on libstdc++, which has already broken this
+          # build once (see tests/support/ptl_catch.hpp).
+          - { name: "libc++ (AppleClang proxy)", os: ubuntu-latest,
+              apt: "clang libc++-dev libc++abi-dev",
+              flags: "-DCMAKE_CXX_COMPILER=clang++ -DCMAKE_CXX_FLAGS=-stdlib=libc++ -DCMAKE_EXE_LINKER_FLAGS=-stdlib=libc++" }
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Install toolchain
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get update -qq
+            sudo apt-get install -y ninja-build libsqlite3-dev ${{ matrix.apt }}
+          else
+            brew install ninja
+          fi
+      - run: cmake -S . -B build/port -G Ninja -DCMAKE_BUILD_TYPE=Debug ${{ matrix.flags }}
+      - run: cmake --build build/port
+      - run: cd build/port && ctest --output-on-failure
+
+  determinism:
+    name: cross-platform determinism
+    needs: build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Install toolchain
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get update -qq && sudo apt-get install -y ninja-build libsqlite3-dev
+          else
+            brew install ninja
+          fi
+      - run: cmake --preset linux-gcc-release || cmake --preset macos-release
+        continue-on-error: true
+      - name: Build and emit the determinism fingerprint
+        run: |
+          cmake -S . -B build/det -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/det --target ptl_version
+          # The RNG sequence and config hash must match byte-for-byte on both
+          # platforms. The git SHA differs per commit but not per OS, so the
+          # RunId is comparable too.
+          ./build/det/apps/ptl_version -c config/base.toml \
+            | grep -E 'config hash|rng\[0' | tee fingerprint-$RUNNER_OS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fingerprint-${{ matrix.os }}
+          path: fingerprint-*.txt
