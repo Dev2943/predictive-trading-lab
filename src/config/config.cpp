@@ -2,8 +2,9 @@
 
 #include <algorithm>
 #include <charconv>
-#include <cstdio>
 #include <cstdint>
+#include <cstdio>
+#include <fstream>
 #include <set>
 #include <sstream>
 
@@ -21,24 +22,47 @@ namespace {
 /// refuses. Each phase appends its own keys here as it introduces them.
 const std::set<std::string, std::less<>>& known_keys() {
     static const std::set<std::string, std::less<>> keys{
-        "run.seed", "run.results_dir", "run.tag", "run.fail_on_validation_warning",
-        "data.raw_dir", "data.normalized_dir", "data.reference_dir", "data.cache_dir",
-        "data.t1.provider", "data.t1.feed", "data.t1.schema",
-        "data.t1.timestamp_semantics", "data.t1.coverage",
+        "run.seed",
+        "run.results_dir",
+        "run.tag",
+        "run.fail_on_validation_warning",
+        "data.raw_dir",
+        "data.normalized_dir",
+        "data.reference_dir",
+        "data.cache_dir",
+        "data.t1.provider",
+        "data.t1.feed",
+        "data.t1.schema",
+        "data.t1.timestamp_semantics",
+        "data.t1.coverage",
         "data.t1.historical_end_delay_minutes",
-        "data.t2.provider", "data.t2.feed", "data.t2.schema",
-        "data.t2.timestamp_semantics", "data.t2.coverage",
+        "data.t2.provider",
+        "data.t2.feed",
+        "data.t2.schema",
+        "data.t2.timestamp_semantics",
+        "data.t2.coverage",
         "data.t2.historical_end_delay_minutes",
-        "data.t3.provider", "data.t3.feed", "data.t3.schema",
-        "data.t3.timestamp_semantics", "data.t3.coverage",
+        "data.t3.provider",
+        "data.t3.feed",
+        "data.t3.schema",
+        "data.t3.timestamp_semantics",
+        "data.t3.coverage",
         "data.t3.historical_end_delay_minutes",
-        "data.databento.max_spend_usd", "data.databento.require_explicit_paid_override",
-        "market_session.timezone", "market_session.regular_open",
-        "market_session.regular_close", "market_session.exclude_opening_auction",
+        "data.databento.max_spend_usd",
+        "data.databento.require_explicit_paid_override",
+        "market_session.timezone",
+        "market_session.regular_open",
+        "market_session.regular_close",
+        "market_session.exclude_opening_auction",
         "market_session.exclude_closing_auction",
-        "holdout.boundary_date", "holdout.months", "holdout.unlocked",
+        "holdout.boundary_date",
+        "holdout.months",
+        "holdout.unlocked",
         "holdout.unlock_justification",
-        "log.level", "log.file", "log.console", "log.json",
+        "log.level",
+        "log.file",
+        "log.console",
+        "log.json",
     };
     return keys;
 }
@@ -144,7 +168,7 @@ bool set_dotted(toml::table& root, std::string_view dotted, std::string_view val
     }
     std::int64_t i64 = 0;
     const auto* first = value.data();
-    const auto* last  = value.data() + value.size();
+    const auto* last = value.data() + value.size();
     if (auto [p, ec] = std::from_chars(first, last, i64); ec == std::errc{} && p == last) {
         cur->insert_or_assign(leaf, i64);
         return true;
@@ -180,11 +204,11 @@ double get_dbl(const toml::table& t, std::string_view path, double fallback) {
 
 void read_tier(const toml::table& t, std::string_view prefix, DataTier& tier) {
     const std::string p{prefix};
-    tier.provider            = get_str(t, p + ".provider", "");
-    tier.feed                = get_str(t, p + ".feed", "");
-    tier.schema              = get_str(t, p + ".schema", "");
+    tier.provider = get_str(t, p + ".provider", "");
+    tier.feed = get_str(t, p + ".feed", "");
+    tier.schema = get_str(t, p + ".schema", "");
     tier.timestamp_semantics = get_str(t, p + ".timestamp_semantics", "");
-    tier.coverage            = get_str(t, p + ".coverage", "");
+    tier.coverage = get_str(t, p + ".coverage", "");
     tier.historical_end_delay_minutes =
         static_cast<int>(get_int(t, p + ".historical_end_delay_minutes", 0));
 }
@@ -213,13 +237,12 @@ Result<Config> finish(toml::table& root, std::string_view origin) {
     cfg.run.seed = static_cast<std::uint64_t>(get_int(root, "run.seed", 20240101));
     cfg.run.results_dir = get_str(root, "run.results_dir", "results");
     cfg.run.tag = get_str(root, "run.tag", "");
-    cfg.run.fail_on_validation_warning =
-        get_bool(root, "run.fail_on_validation_warning", false);
+    cfg.run.fail_on_validation_warning = get_bool(root, "run.fail_on_validation_warning", false);
 
-    cfg.data.raw_dir        = get_str(root, "data.raw_dir", "data/raw");
+    cfg.data.raw_dir = get_str(root, "data.raw_dir", "data/raw");
     cfg.data.normalized_dir = get_str(root, "data.normalized_dir", "data/normalized");
-    cfg.data.reference_dir  = get_str(root, "data.reference_dir", "data/reference");
-    cfg.data.cache_dir      = get_str(root, "data.cache_dir", "data/cache");
+    cfg.data.reference_dir = get_str(root, "data.reference_dir", "data/reference");
+    cfg.data.cache_dir = get_str(root, "data.cache_dir", "data/cache");
 
     read_tier(root, "data.t1", cfg.t1);
     read_tier(root, "data.t2", cfg.t2);
@@ -229,8 +252,8 @@ Result<Config> finish(toml::table& root, std::string_view origin) {
     cfg.databento.require_explicit_paid_override =
         get_bool(root, "data.databento.require_explicit_paid_override", true);
 
-    cfg.session.timezone      = get_str(root, "market_session.timezone", "America/New_York");
-    cfg.session.regular_open  = get_str(root, "market_session.regular_open", "09:30:00");
+    cfg.session.timezone = get_str(root, "market_session.timezone", "America/New_York");
+    cfg.session.regular_open = get_str(root, "market_session.regular_open", "09:30:00");
     cfg.session.regular_close = get_str(root, "market_session.regular_close", "16:00:00");
     cfg.session.exclude_opening_auction =
         get_bool(root, "market_session.exclude_opening_auction", true);
@@ -238,8 +261,8 @@ Result<Config> finish(toml::table& root, std::string_view origin) {
         get_bool(root, "market_session.exclude_closing_auction", true);
 
     cfg.holdout.boundary_date = get_str(root, "holdout.boundary_date", "");
-    cfg.holdout.months        = static_cast<int>(get_int(root, "holdout.months", 4));
-    cfg.holdout.unlocked      = get_bool(root, "holdout.unlocked", false);
+    cfg.holdout.months = static_cast<int>(get_int(root, "holdout.months", 4));
+    cfg.holdout.unlocked = get_bool(root, "holdout.unlocked", false);
     cfg.holdout.unlock_justification = get_str(root, "holdout.unlock_justification", "");
 
     const std::string level_text = get_str(root, "log.level", "info");
@@ -247,18 +270,17 @@ Result<Config> finish(toml::table& root, std::string_view origin) {
         return fail(make_error(ErrorCode::ConfigError, "invalid log.level: " + level_text,
                                std::string{origin}));
     }
-    cfg.log.file    = get_str(root, "log.file", "");
+    cfg.log.file = get_str(root, "log.file", "");
     cfg.log.console = get_bool(root, "log.console", true);
-    cfg.log.json    = get_bool(root, "log.json", true);
+    cfg.log.json = get_bool(root, "log.json", true);
 
     // --- semantic validation -------------------------------------------------
     if (cfg.holdout.months < 1) {
-        return fail(make_error(ErrorCode::ConfigError, "holdout.months must be >= 1",
-                               std::string{origin}));
+        return fail(
+            make_error(ErrorCode::ConfigError, "holdout.months must be >= 1", std::string{origin}));
     }
     if (cfg.databento.max_spend_usd < 0.0) {
-        return fail(make_error(ErrorCode::ConfigError,
-                               "data.databento.max_spend_usd must be >= 0",
+        return fail(make_error(ErrorCode::ConfigError, "data.databento.max_spend_usd must be >= 0",
                                std::string{origin}));
     }
     if (cfg.holdout.unlocked && cfg.holdout.unlock_justification.empty()) {
@@ -286,7 +308,9 @@ Result<Config> finish(toml::table& root, std::string_view origin) {
 
 }  // namespace
 
-std::uint64_t Config::hash() const noexcept { return fnv1a64(canonical); }
+std::uint64_t Config::hash() const noexcept {
+    return fnv1a64(canonical);
+}
 
 std::string RunId::hex() const {
     char buf[20];
@@ -326,13 +350,12 @@ Result<Config> load_from_string(std::string_view toml_text, std::span<const std:
     for (const auto& ov : overrides) {
         const std::size_t eq = ov.find('=');
         if (eq == std::string::npos || eq == 0) {
-            return fail(make_error(ErrorCode::InvalidArgument,
-                                   "override must be key=value, got: " + ov));
+            return fail(
+                make_error(ErrorCode::InvalidArgument, "override must be key=value, got: " + ov));
         }
         if (!set_dotted(root, std::string_view{ov}.substr(0, eq),
                         std::string_view{ov}.substr(eq + 1))) {
-            return fail(make_error(ErrorCode::InvalidArgument,
-                                   "cannot apply override: " + ov));
+            return fail(make_error(ErrorCode::InvalidArgument, "cannot apply override: " + ov));
         }
     }
     return finish(root, origin);

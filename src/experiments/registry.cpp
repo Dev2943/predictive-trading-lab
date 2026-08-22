@@ -2,9 +2,9 @@
 
 #include <sqlite3.h>
 
-#include "ptl/core/clock.hpp"
-
 #include <utility>
+
+#include "ptl/core/clock.hpp"
 
 namespace ptl::experiments {
 namespace {
@@ -105,12 +105,14 @@ public:
     [[nodiscard]] std::int64_t i64(int col) const { return sqlite3_column_int64(stmt_, col); }
 
 private:
-    sqlite3*      db_ = nullptr;
+    sqlite3* db_ = nullptr;
     sqlite3_stmt* stmt_ = nullptr;
-    int           rc_ = SQLITE_ERROR;
+    int rc_ = SQLITE_ERROR;
 };
 
-std::string now_utc() { return to_iso8601(WallClock{}.now()); }
+std::string now_utc() {
+    return to_iso8601(WallClock{}.now());
+}
 
 }  // namespace
 
@@ -174,8 +176,7 @@ Result<bool> Registry::insert_run(const RunRecord& r) {
 
 Result<bool> Registry::finish_run(std::string_view run_id, std::string_view status,
                                   std::uint64_t chain_violations) {
-    Stmt s{db_,
-           "UPDATE runs SET status=?1, finished_utc=?2, chain_violations=?3 WHERE run_id=?4"};
+    Stmt s{db_, "UPDATE runs SET status=?1, finished_utc=?2, chain_violations=?3 WHERE run_id=?4"};
     if (!s.ok()) return fail(sqlite_error(db_, "prepare finish_run"));
     s.bind(1, status);
     s.bind(2, now_utc());
@@ -297,8 +298,8 @@ Result<bool> Registry::record_metric(std::string_view run_id, std::int64_t trial
 Result<bool> Registry::record_holdout_unlock(std::string_view run_id,
                                              std::string_view justification) {
     if (justification.empty()) {
-        return fail(make_error(ErrorCode::InvalidArgument,
-                               "holdout unlock requires a justification"));
+        return fail(
+            make_error(ErrorCode::InvalidArgument, "holdout unlock requires a justification"));
     }
     Stmt s{db_,
            "INSERT INTO holdout_unlocks (unlocked_utc, run_id, justification)"

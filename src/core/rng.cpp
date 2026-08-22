@@ -25,17 +25,17 @@ namespace {
 [[nodiscard]] inline std::uint64_t mul64x64_hi(std::uint64_t a, std::uint64_t b,
                                                std::uint64_t& low) noexcept {
 #if defined(__SIZEOF_INT128__)
-#  if defined(__GNUC__) || defined(__clang__)
-#    pragma GCC diagnostic push
-#    pragma GCC diagnostic ignored "-Wpedantic"
-#  endif
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+#endif
     using u128 = unsigned __int128;
     const u128 prod = static_cast<u128>(a) * static_cast<u128>(b);
     low = static_cast<std::uint64_t>(prod);
     return static_cast<std::uint64_t>(prod >> 64);
-#  if defined(__GNUC__) || defined(__clang__)
-#    pragma GCC diagnostic pop
-#  endif
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 #else
     const std::uint64_t a_lo = a & 0xFFFFFFFFULL;
     const std::uint64_t a_hi = a >> 32;
@@ -89,9 +89,7 @@ std::uint64_t DeterministicRng::bounded(std::uint64_t n) noexcept {
     // Lemire: multiply into the high half, reject the short interval that
     // would otherwise bias low values. `% n` alone is biased whenever n does
     // not divide 2^64.
-    const auto mul = [n](std::uint64_t x, std::uint64_t& low) {
-        return mul64x64_hi(x, n, low);
-    };
+    const auto mul = [n](std::uint64_t x, std::uint64_t& low) { return mul64x64_hi(x, n, low); };
     std::uint64_t low = 0;
     std::uint64_t hi_ = mul(next_u64(), low);
     if (low < n) {
@@ -111,14 +109,14 @@ double DeterministicRng::normal(double mean, double stddev) noexcept {
     // the seed.
     double u = 0.0, v = 0.0, sq = 0.0;
     do {
-        u  = 2.0 * uniform01() - 1.0;
-        v  = 2.0 * uniform01() - 1.0;
+        u = 2.0 * uniform01() - 1.0;
+        v = 2.0 * uniform01() - 1.0;
         sq = u * u + v * v;
     } while (sq >= 1.0 || sq == 0.0);
 
     const double f = std::sqrt(-2.0 * std::log(sq) / sq);
-    spare_normal_  = v * f;
-    has_spare_     = true;
+    spare_normal_ = v * f;
+    has_spare_ = true;
     return mean + stddev * (u * f);
 }
 

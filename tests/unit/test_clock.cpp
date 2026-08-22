@@ -1,10 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
-
-#include "support/ptl_catch.hpp"
-
 #include <stdexcept>
 
 #include "ptl/core/clock.hpp"
+#include "support/ptl_catch.hpp"
 
 using namespace ptl;
 using namespace std::chrono;

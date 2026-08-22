@@ -13,7 +13,7 @@
 #include "ptl/core/compiler.hpp"
 
 #if PTL_HAS_STD_EXPECTED
-#  include <expected>
+#include <expected>
 #endif
 
 namespace ptl {
@@ -32,7 +32,7 @@ enum class ErrorCode {
 [[nodiscard]] std::string_view to_string(ErrorCode c) noexcept;
 
 struct Error {
-    ErrorCode   code = ErrorCode::Ok;
+    ErrorCode code = ErrorCode::Ok;
     std::string message;
     std::string context;  // file:line, symbol, row number -- whatever locates it
 
@@ -62,28 +62,32 @@ using Result = std::expected<T, Error>;
 template <class T>
 class Result {
 public:
-    Result(T value) : has_(true), value_(std::move(value)) {}       // NOLINT(google-explicit-constructor)
-    Result(Error error) : has_(false), error_(std::move(error)) {}  // NOLINT(google-explicit-constructor)
+    Result(T value)
+        : has_(true), value_(std::move(value)) {}  // NOLINT(google-explicit-constructor)
+    Result(Error error)
+        : has_(false), error_(std::move(error)) {}  // NOLINT(google-explicit-constructor)
 
     [[nodiscard]] bool has_value() const noexcept { return has_; }
     explicit operator bool() const noexcept { return has_; }
 
-    [[nodiscard]] T&           value()       { return value_; }
-    [[nodiscard]] const T&     value() const { return value_; }
+    [[nodiscard]] T& value() { return value_; }
+    [[nodiscard]] const T& value() const { return value_; }
     [[nodiscard]] const Error& error() const { return error_; }
 
-    T*       operator->()       { return &value_; }
+    T* operator->() { return &value_; }
     const T* operator->() const { return &value_; }
-    T&       operator*()        { return value_; }
-    const T& operator*() const  { return value_; }
+    T& operator*() { return value_; }
+    const T& operator*() const { return value_; }
 
 private:
-    bool  has_;
-    T     value_{};
+    bool has_;
+    T value_{};
     Error error_{};
 };
 
-[[nodiscard]] inline Error fail(Error e) { return e; }
+[[nodiscard]] inline Error fail(Error e) {
+    return e;
+}
 
 #endif
 

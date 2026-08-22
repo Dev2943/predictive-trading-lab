@@ -14,17 +14,25 @@
 ///    the per-event hot path costs literally nothing in a normal build --
 ///    which is what makes it safe to instrument the simulation loop at all.
 ///
-/// 3. FACADE, NOT A DEPENDENCY. The backend is selected at build time
+/// 3. SIMULATION-TIME STAMPED. When a clock is installed, every record carries
+///    BOTH sim_time and wall_time. This is not cosmetic: the paper-trading
+///    parity check in Phase 12 compares a live journal against a replayed one,
+///    and that comparison is impossible if every line differs. Stripping the
+///    single wall_time field makes two identical runs byte-identical.
+///
+/// 4. FACADE, NOT A DEPENDENCY. The backend is selected at build time
 ///    (-DPTL_LOG_BACKEND=builtin|spdlog). No ptl header includes spdlog, so
 ///    the choice is reversible and compile times stay low.
 
-#include <cstdint>
 #include <array>
+#include <cstdint>
 #include <span>
 #include <string>
 #include <string_view>
 #include <type_traits>
 #include <variant>
+
+#include "ptl/core/clock.hpp"
 
 namespace ptl::log {
 
@@ -42,12 +50,12 @@ inline constexpr Level kCompiledMinLevel =
     Level::Debug;
 #endif
 
-using FieldValue = std::variant<std::int64_t, std::uint64_t, double, bool,
-                                std::string_view, std::string>;
+using FieldValue =
+    std::variant<std::int64_t, std::uint64_t, double, bool, std::string_view, std::string>;
 
 struct Field {
     std::string_view key;
-    FieldValue       value;
+    FieldValue value;
 };
 
 /// Field constructors, so call sites read as kv("symbol", "SPY").
@@ -84,12 +92,20 @@ template <class... Fs>
 }
 
 struct Config {
-    Level       level        = Level::Info;
-    std::string file;                    // empty = no file sink
-    bool        console      = true;
-    bool        json         = true;     // false = human-readable, for terminals
-    bool        async        = false;    // Phase 12: lock-free queue + writer thread
-    std::size_t queue_size   = 8192;
+    Level level = Level::Info;
+    std::string file;  // empty = no file sink
+    bool console = true;
+    bool json = true;    // false = human-readable, for terminals
+    bool async = false;  // Phase 12: lock-free queue + writer thread
+    std::size_t queue_size = 8192;
+
+    /// Simulation clock. NOT OWNED -- the caller must outlive log::shutdown().
+    ///
+    /// When null (the default), records carry wall_time only, which is correct
+    /// for tools that do not run a simulation. When set, records also carry
+    /// sim_time, and a deterministic replay produces a log that is byte-identical
+    /// across runs once wall_time is removed.
+    const IClock* sim_clock = nullptr;
 };
 
 class Logger {
@@ -109,7 +125,7 @@ private:
     explicit Logger(std::string_view subsystem) : subsystem_(subsystem) {}
 
     std::string_view subsystem_;
-    Level            level_ = Level::Info;
+    Level level_ = Level::Info;
 };
 
 /// Per-subsystem logger. `name` must have static storage duration (a literal).
@@ -132,20 +148,20 @@ void shutdown();
 // runtime `enabled()` check then handles the configured level. Arguments are
 // not evaluated when the level is compiled out.
 
-#define PTL_LOG_AT(logger_, level_, msg_, ...)                                  \
-    do {                                                                        \
-        if constexpr ((level_) >= ::ptl::log::kCompiledMinLevel) {              \
-            const auto& ptl_lg_ = (logger_);                                    \
-            if (ptl_lg_.enabled(level_)) {                                      \
-                const auto ptl_fs_ = ::ptl::log::fields(__VA_ARGS__);           \
-                ptl_lg_.log((level_), (msg_), ptl_fs_);                         \
-            }                                                                   \
-        }                                                                       \
+#define PTL_LOG_AT(logger_, level_, msg_, ...)                        \
+    do {                                                              \
+        if constexpr ((level_) >= ::ptl::log::kCompiledMinLevel) {    \
+            const auto& ptl_lg_ = (logger_);                          \
+            if (ptl_lg_.enabled(level_)) {                            \
+                const auto ptl_fs_ = ::ptl::log::fields(__VA_ARGS__); \
+                ptl_lg_.log((level_), (msg_), ptl_fs_);               \
+            }                                                         \
+        }                                                             \
     } while (false)
 
-#define PTL_TRACE(lg, msg, ...) PTL_LOG_AT(lg, ::ptl::log::Level::Trace,    msg, __VA_ARGS__)
-#define PTL_DEBUG(lg, msg, ...) PTL_LOG_AT(lg, ::ptl::log::Level::Debug,    msg, __VA_ARGS__)
-#define PTL_INFO(lg, msg, ...)  PTL_LOG_AT(lg, ::ptl::log::Level::Info,     msg, __VA_ARGS__)
-#define PTL_WARN(lg, msg, ...)  PTL_LOG_AT(lg, ::ptl::log::Level::Warn,     msg, __VA_ARGS__)
-#define PTL_ERROR(lg, msg, ...) PTL_LOG_AT(lg, ::ptl::log::Level::Error,    msg, __VA_ARGS__)
-#define PTL_CRIT(lg, msg, ...)  PTL_LOG_AT(lg, ::ptl::log::Level::Critical, msg, __VA_ARGS__)
+#define PTL_TRACE(lg, msg, ...) PTL_LOG_AT(lg, ::ptl::log::Level::Trace, msg, __VA_ARGS__)
+#define PTL_DEBUG(lg, msg, ...) PTL_LOG_AT(lg, ::ptl::log::Level::Debug, msg, __VA_ARGS__)
+#define PTL_INFO(lg, msg, ...) PTL_LOG_AT(lg, ::ptl::log::Level::Info, msg, __VA_ARGS__)
+#define PTL_WARN(lg, msg, ...) PTL_LOG_AT(lg, ::ptl::log::Level::Warn, msg, __VA_ARGS__)
+#define PTL_ERROR(lg, msg, ...) PTL_LOG_AT(lg, ::ptl::log::Level::Error, msg, __VA_ARGS__)
+#define PTL_CRIT(lg, msg, ...) PTL_LOG_AT(lg, ::ptl::log::Level::Critical, msg, __VA_ARGS__)

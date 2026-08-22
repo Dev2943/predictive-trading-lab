@@ -6,6 +6,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <string_view>
 
@@ -22,17 +23,34 @@ namespace ptl {
 // the compiler enumerate every site needing attention.
 // See docs/adr/0002-price-representation.md.
 
-using Price    = NamedType<double, struct PriceTag,    Arithmetic, Comparable>;
-using Qty      = NamedType<double, struct QtyTag,      Arithmetic, Comparable>;
-using Volume   = NamedType<double, struct VolumeTag,   Arithmetic, Comparable>;
+using Price = NamedType<double, struct PriceTag, Arithmetic, Comparable>;
+using Qty = NamedType<double, struct QtyTag, Arithmetic, Comparable>;
+using Volume = NamedType<double, struct VolumeTag, Arithmetic, Comparable>;
 using Notional = NamedType<double, struct NotionalTag, Arithmetic, Comparable>;
-using Bps      = NamedType<double, struct BpsTag,      Arithmetic, Comparable>;
+using Bps = NamedType<double, struct BpsTag, Arithmetic, Comparable>;
 
 // Qty and Volume are both share counts but are NOT interchangeable: Qty is our
 // order/position size, Volume is market activity. Participation limits relate
 // the two, and doing so requires an explicit, reviewable conversion.
+//
+// Zero volume returns 0, not infinity. Zero-volume minutes are real in this
+// universe -- XLE and TLT have them near the open and in quiet afternoons. An
+// inf here would flow into a participation cap, then a fill quantity, then a
+// P&L number, and a single non-finite value makes an entire Sharpe ratio NaN
+// hundreds of lines away from its cause.
+//
+// Note the semantics carefully: 0 means "no participation is measurable",
+// NOT "unlimited participation". A caller enforcing a cap must treat zero
+// volume as no liquidity available, not as an unconstrained fill.
 [[nodiscard]] constexpr double participation(Qty q, Volume v) noexcept {
-    return q.get() / v.get();
+    return v.get() == 0.0 ? 0.0 : q.get() / v.get();
+}
+
+/// True when every component of a computed value is finite. Accounting and
+/// metrics assert on this: inf and NaN do not throw, they propagate silently.
+[[nodiscard]] constexpr bool is_finite(double x) noexcept {
+    return x == x && x != std::numeric_limits<double>::infinity() &&
+           x != -std::numeric_limits<double>::infinity();
 }
 
 /// Price x Qty -> Notional. The only sanctioned cross-unit product.
@@ -47,7 +65,13 @@ using Bps      = NamedType<double, struct BpsTag,      Arithmetic, Comparable>;
 }
 
 /// Signed relative difference of `p` against `reference`, in basis points.
+///
+/// A zero reference price is a programming error, not a market condition: no
+/// instrument in scope ever trades at zero. Returning 0 rather than inf keeps
+/// the poison out of downstream aggregates; the debug assertion is what
+/// actually finds the bug.
 [[nodiscard]] constexpr Bps to_bps(Price p, Price reference) noexcept {
+    if (reference.get() == 0.0) return Bps{0.0};
     return Bps{(p.get() / reference.get() - 1.0) * 1e4};
 }
 
@@ -68,7 +92,9 @@ enum class Side : std::uint8_t { Buy = 0, Sell = 1 };
 
 /// +1 for Buy, -1 for Sell. Position deltas and signed notionals go through
 /// this rather than ternaries scattered across the codebase.
-[[nodiscard]] constexpr int sign_of(Side s) noexcept { return s == Side::Buy ? 1 : -1; }
+[[nodiscard]] constexpr int sign_of(Side s) noexcept {
+    return s == Side::Buy ? 1 : -1;
+}
 
 [[nodiscard]] constexpr Side opposite(Side s) noexcept {
     return s == Side::Buy ? Side::Sell : Side::Buy;
@@ -85,12 +111,14 @@ enum class Side : std::uint8_t { Buy = 0, Sell = 1 };
 // break bit-reproducibility across machines. Exchange sessions are loaded as
 // precomputed UTC instants from data/reference/calendars/ (ADR-0001 A1).
 using Timestamp = std::chrono::sys_time<std::chrono::nanoseconds>;
-using Duration  = std::chrono::nanoseconds;
+using Duration = std::chrono::nanoseconds;
 
 inline constexpr Timestamp kNoTimestamp{Duration::min()};
 inline constexpr Timestamp kMaxTimestamp{Duration::max()};
 
-[[nodiscard]] constexpr bool is_set(Timestamp ts) noexcept { return ts != kNoTimestamp; }
+[[nodiscard]] constexpr bool is_set(Timestamp ts) noexcept {
+    return ts != kNoTimestamp;
+}
 
 /// Parse "YYYY-MM-DD" or "YYYY-MM-DDTHH:MM:SS[.fffffffff]" (trailing Z
 /// optional, space accepted for T) as UTC. Hand-rolled rather than
@@ -101,6 +129,6 @@ inline constexpr Timestamp kMaxTimestamp{Duration::max()};
 
 [[nodiscard]] std::string to_iso8601(Timestamp ts);
 [[nodiscard]] std::string to_date_string(Timestamp ts);
-[[nodiscard]] Timestamp   utc_date_floor(Timestamp ts) noexcept;
+[[nodiscard]] Timestamp utc_date_floor(Timestamp ts) noexcept;
 
 }  // namespace ptl

@@ -29,9 +29,9 @@ namespace fs = std::filesystem;
 
 struct RunSection {
     std::uint64_t seed = 20240101;
-    fs::path      results_dir = "results";
-    std::string   tag;
-    bool          fail_on_validation_warning = false;
+    fs::path results_dir = "results";
+    std::string tag;
+    bool fail_on_validation_warning = false;
 };
 
 struct DataSection {
@@ -49,12 +49,12 @@ struct DataTier {
     std::string schema;
     std::string timestamp_semantics;
     std::string coverage;
-    int         historical_end_delay_minutes = 0;
+    int historical_end_delay_minutes = 0;
 };
 
 struct DatabentoSection {
     double max_spend_usd = 25.0;
-    bool   require_explicit_paid_override = true;
+    bool require_explicit_paid_override = true;
 };
 
 /// Session boundaries.
@@ -69,42 +69,49 @@ struct SessionSection {
     std::string timezone = "America/New_York";
     std::string regular_open = "09:30:00";
     std::string regular_close = "16:00:00";
-    bool        exclude_opening_auction = true;
-    bool        exclude_closing_auction = true;
+    bool exclude_opening_auction = true;
+    bool exclude_closing_auction = true;
 
-    /// Left-edge minute bars over [09:30, 16:00) are stamped 09:30..15:59 =
-    /// 390. Excluding the opening auction drops the 09:30 bar, leaving 389.
-    /// Any feature written against a hardcoded 390 silently reaches across the
-    /// overnight gap. See ADR-0001 Addendum A2.
-    [[nodiscard]] int tradable_bars_per_session() const noexcept {
-        return 390 - (exclude_opening_auction ? 1 : 0);
-    }
+    // NO tradable_bars_per_session() HERE, DELIBERATELY.
+    //
+    // A previous revision computed 390 minus the opening auction. That is wrong
+    // on every half-day -- the day after Thanksgiving, Christmas Eve and July 3
+    // close at 13:00, giving 210 minutes -- and it silently ignored
+    // exclude_closing_auction. A feature written against it reaches across the
+    // overnight gap on roughly six sessions a year and produces plausible
+    // numbers, which is the worst failure mode available.
+    //
+    // Session length is a property of a DATE, not a compile-time constant. Ask
+    // ptl::market::Calendar (Phase 2), which loads session boundaries as UTC
+    // instants from data/reference/calendars/. This struct supplies the default
+    // schedule; the calendar supplies the exceptions. See ADR-0001 Addendum A2
+    // and the Phase 1 review, finding H-4.
 };
 
 struct HoldoutSection {
     /// Fixed BEFORE any data is examined; enters the config hash so it cannot
     /// be quietly moved after seeing results.
     std::string boundary_date;  // "YYYY-MM-DD"; empty = not yet ingested
-    int         months = 4;
-    bool        unlocked = false;
+    int months = 4;
+    bool unlocked = false;
     std::string unlock_justification;
 };
 
 struct LogSection {
-    log::Level  level = log::Level::Info;
+    log::Level level = log::Level::Info;
     std::string file;
-    bool        console = true;
-    bool        json = true;
+    bool console = true;
+    bool json = true;
 };
 
 struct Config {
-    RunSection       run;
-    DataSection      data;
-    DataTier         t1, t2, t3;
+    RunSection run;
+    DataSection data;
+    DataTier t1, t2, t3;
     DatabentoSection databento;
-    SessionSection   session;
-    HoldoutSection   holdout;
-    LogSection       log;
+    SessionSection session;
+    HoldoutSection holdout;
+    LogSection log;
 
     std::string source_path;
 
@@ -125,21 +132,20 @@ struct RunId {
 };
 
 [[nodiscard]] RunId make_run_id(std::string_view config_canonical,
-                                std::string_view data_manifest_sha,
-                                std::string_view git_sha,
-                                std::uint64_t    seed) noexcept;
+                                std::string_view data_manifest_sha, std::string_view git_sha,
+                                std::uint64_t seed) noexcept;
 
 /// Load `path`, apply dotted overrides ("run.seed=42", "log.level=debug"),
 /// then validate strictly.
 ///
 /// Overrides exist so a parameter sweep drives one config file from the command
 /// line rather than generating dozens of near-identical files that then drift.
-[[nodiscard]] Result<Config> load(const fs::path&              path,
+[[nodiscard]] Result<Config> load(const fs::path& path,
                                   std::span<const std::string> overrides = {});
 
 /// Parse a TOML string directly. Used by tests and by the sweep runner.
-[[nodiscard]] Result<Config> load_from_string(std::string_view             toml_text,
+[[nodiscard]] Result<Config> load_from_string(std::string_view toml_text,
                                               std::span<const std::string> overrides = {},
-                                              std::string_view             origin = "<string>");
+                                              std::string_view origin = "<string>");
 
 }  // namespace ptl::config

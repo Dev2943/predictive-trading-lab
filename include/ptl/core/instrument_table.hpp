@@ -39,7 +39,7 @@ public:
     }
 
     [[nodiscard]] std::size_t size() const noexcept { return by_id_.size(); }
-    [[nodiscard]] bool        empty() const noexcept { return by_id_.empty(); }
+    [[nodiscard]] bool empty() const noexcept { return by_id_.empty(); }
 
     /// Insertion-ordered view. Iterate this, never the map.
     [[nodiscard]] std::span<const std::string_view> all() const noexcept { return by_id_; }
@@ -52,8 +52,8 @@ private:
     // this storage, and a vector<string> would invalidate every one of them on
     // reallocation -- a dangling-reference bug that only appears once the
     // universe grows past the initial capacity.
-    std::deque<std::string>                            storage_;
-    std::vector<std::string_view>                      by_id_;
+    std::deque<std::string> storage_;
+    std::vector<std::string_view> by_id_;
     std::unordered_map<std::string_view, InstrumentId> index_;
 };
 

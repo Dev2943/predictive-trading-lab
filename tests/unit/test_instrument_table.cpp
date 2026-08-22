@@ -1,11 +1,9 @@
 #include <catch2/catch_test_macros.hpp>
-
-#include "support/ptl_catch.hpp"
-
 #include <string>
 #include <vector>
 
 #include "ptl/core/instrument_table.hpp"
+#include "support/ptl_catch.hpp"
 
 using namespace ptl;
 

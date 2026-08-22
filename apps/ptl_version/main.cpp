@@ -6,11 +6,10 @@
 /// has. When someone asks "which build produced results/a3f9.../?", this is
 /// how they find out, and it exercises every Phase 1 module end to end.
 
+#include <CLI/CLI.hpp>
 #include <cstdio>
 #include <string>
 #include <vector>
-
-#include <CLI/CLI.hpp>
 
 #include "ptl/config/config.hpp"
 #include "ptl/core/clock.hpp"
@@ -34,15 +33,13 @@ int main(int argc, char** argv) {
     CLI::App app{"predictive-trading-lab build and configuration probe", "ptl_version"};
     argv = app.ensure_utf8(argv);
 
-    std::string              config_path;
+    std::string config_path;
     std::vector<std::string> overrides;
-    std::string              registry_path;
-    bool                     json_log = false;
+    std::string registry_path;
+    bool json_log = false;
 
-    app.add_option("-c,--config", config_path, "TOML configuration file")
-        ->check(CLI::ExistingFile);
-    app.add_option("--set", overrides,
-                   "Override a config value: --set run.seed=42 (repeatable)");
+    app.add_option("-c,--config", config_path, "TOML configuration file")->check(CLI::ExistingFile);
+    app.add_option("--set", overrides, "Override a config value: --set run.seed=42 (repeatable)");
     app.add_option("--registry", registry_path,
                    "Register this invocation in the experiment registry at PATH");
     app.add_flag("--json-log", json_log, "Emit structured JSONL logs to stdout");
@@ -54,16 +51,14 @@ int main(int argc, char** argv) {
     std::puts("build");
     print_kv("git", std::string{ptl::kGitDescribe} + " (" + std::string{ptl::kGitDirty} + ")");
     print_kv("commit", std::string{ptl::kGitSha});
-    print_kv("compiler",
-             std::string{ptl::kCompilerId} + " " + std::string{ptl::kCompilerVer});
+    print_kv("compiler", std::string{ptl::kCompilerId} + " " + std::string{ptl::kCompilerVer});
     print_kv("build type", std::string{ptl::kBuildType});
 
     std::puts("\ntoolchain capability probes");
     print_kv("std::expected", PTL_HAS_STD_EXPECTED ? "yes" : "no (using ptl::Result fallback)");
     print_kv("std::format", PTL_HAS_STD_FORMAT ? "yes" : "no");
-    print_kv("chrono tzdb", PTL_HAS_CHRONO_TZDB
-                                ? "present (still unused by design -- ADR-0001 A1)"
-                                : "absent (as expected; engine is UTC-only)");
+    print_kv("chrono tzdb", PTL_HAS_CHRONO_TZDB ? "present (still unused by design -- ADR-0001 A1)"
+                                                : "absent (as expected; engine is UTC-only)");
 
     // The chain is the project's central invariant, so the probe demonstrates
     // it rather than merely describing it: a decision that fills at its own
@@ -74,12 +69,12 @@ int main(int argc, char** argv) {
         (void)ptl::parse_timestamp("2024-01-02T14:52:00Z", t0);
 
         ptl::LifecycleTimes good;
-        good.exchange_time    = t0;
-        good.receive_time     = t0 + std::chrono::milliseconds{2};
+        good.exchange_time = t0;
+        good.receive_time = t0 + std::chrono::milliseconds{2};
         good.feature_end_time = t0 + std::chrono::seconds{60};
-        good.decision_time    = t0 + std::chrono::seconds{60};
-        good.arrival_time     = t0 + std::chrono::seconds{61};
-        good.fill_time        = t0 + std::chrono::seconds{61};
+        good.decision_time = t0 + std::chrono::seconds{60};
+        good.arrival_time = t0 + std::chrono::seconds{61};
+        good.fill_time = t0 + std::chrono::seconds{61};
         const auto v1 = ptl::validate_chain(good);
         print_kv("well-ordered chain", v1 ? ("REJECTED: " + v1->describe()) : "accepted");
 
@@ -97,10 +92,10 @@ int main(int argc, char** argv) {
             return 2;
         }
         ptl::log::Config lc;
-        lc.level   = cfg->log.level;
+        lc.level = cfg->log.level;
         lc.console = cfg->log.console;
-        lc.json    = json_log || cfg->log.json;
-        lc.file    = cfg->log.file;
+        lc.json = json_log || cfg->log.json;
+        lc.file = cfg->log.file;
         ptl::log::init(lc);
 
         const auto run_id = ptl::config::make_run_id(cfg->canonical, "no-data-manifest",
@@ -115,11 +110,10 @@ int main(int argc, char** argv) {
         print_kv("run id", run_id.hex());
         print_kv("seed", std::to_string(cfg->run.seed));
         print_kv("holdout boundary",
-                 cfg->holdout.boundary_date.empty() ? "(not yet set)"
-                                                    : cfg->holdout.boundary_date);
+                 cfg->holdout.boundary_date.empty() ? "(not yet set)" : cfg->holdout.boundary_date);
         print_kv("holdout", cfg->holdout.unlocked ? "UNLOCKED" : "locked");
-        print_kv("tradable bars/session",
-                 std::to_string(cfg->session.tradable_bars_per_session()));
+        print_kv("session", cfg->session.regular_open + "-" + cfg->session.regular_close +
+                                " (length is calendar-driven; Phase 2)");
         print_kv("t1", cfg->t1.provider + " " + cfg->t1.feed + " " + cfg->t1.schema);
         print_kv("t2", cfg->t2.provider + " " + cfg->t2.schema);
 
@@ -151,22 +145,21 @@ int main(int argc, char** argv) {
                 return 3;
             }
             ptl::experiments::RunRecord rec;
-            rec.run_id            = run_id.hex();
-            rec.git_sha           = ptl::kGitSha;
-            rec.git_dirty         = ptl::kGitDirty;
-            rec.config_hash       = hashbuf;
-            rec.config_canonical  = cfg->canonical;
+            rec.run_id = run_id.hex();
+            rec.git_sha = ptl::kGitSha;
+            rec.git_dirty = ptl::kGitDirty;
+            rec.config_hash = hashbuf;
+            rec.config_canonical = cfg->canonical;
             rec.data_manifest_sha = "no-data-manifest";
-            rec.seed              = cfg->run.seed;
-            rec.compiler          = ptl::kCompilerId;
-            rec.compiler_version  = ptl::kCompilerVer;
-            rec.build_type        = ptl::kBuildType;
-            rec.tag               = cfg->run.tag;
-            rec.status            = "completed";
-            rec.chain_violations  = ptl::chain_violation_count();
+            rec.seed = cfg->run.seed;
+            rec.compiler = ptl::kCompilerId;
+            rec.compiler_version = ptl::kCompilerVer;
+            rec.build_type = ptl::kBuildType;
+            rec.tag = cfg->run.tag;
+            rec.status = "completed";
+            rec.chain_violations = ptl::chain_violation_count();
             if (auto ok = reg->insert_run(rec); !ok) {
-                std::fprintf(stderr, "registry insert failed: %s\n",
-                             ok.error().describe().c_str());
+                std::fprintf(stderr, "registry insert failed: %s\n", ok.error().describe().c_str());
                 return 3;
             }
             print_kv("registered in", registry_path);

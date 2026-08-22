@@ -34,7 +34,7 @@ bool parse_timestamp(std::string_view text, Timestamp& out) noexcept {
     if (!ymd.ok()) return false;
 
     auto point = sys_days{ymd};
-    auto ns    = nanoseconds{0};
+    auto ns = nanoseconds{0};
 
     if (text.size() > 10) {
         const char sep = text[10];
@@ -82,19 +82,16 @@ std::string to_iso8601(Timestamp ts) {
     const auto days_part = floor<days>(ts);
     const year_month_day ymd{days_part};
     const auto since_midnight = ts - days_part;
-    const auto h  = duration_cast<hours>(since_midnight);
+    const auto h = duration_cast<hours>(since_midnight);
     const auto mi = duration_cast<minutes>(since_midnight - h);
-    const auto s  = duration_cast<seconds>(since_midnight - h - mi);
+    const auto s = duration_cast<seconds>(since_midnight - h - mi);
     const auto ns = duration_cast<nanoseconds>(since_midnight - h - mi - s);
 
     char buf[40];
     std::snprintf(buf, sizeof(buf), "%04d-%02u-%02uT%02lld:%02lld:%02lld.%09lldZ",
-                  static_cast<int>(ymd.year()),
-                  static_cast<unsigned>(ymd.month()),
-                  static_cast<unsigned>(ymd.day()),
-                  static_cast<long long>(h.count()),
-                  static_cast<long long>(mi.count()),
-                  static_cast<long long>(s.count()),
+                  static_cast<int>(ymd.year()), static_cast<unsigned>(ymd.month()),
+                  static_cast<unsigned>(ymd.day()), static_cast<long long>(h.count()),
+                  static_cast<long long>(mi.count()), static_cast<long long>(s.count()),
                   static_cast<long long>(ns.count()));
     return std::string{buf};
 }
@@ -103,10 +100,8 @@ std::string to_date_string(Timestamp ts) {
     using namespace std::chrono;
     const year_month_day ymd{floor<days>(ts)};
     char buf[16];
-    std::snprintf(buf, sizeof(buf), "%04d-%02u-%02u",
-                  static_cast<int>(ymd.year()),
-                  static_cast<unsigned>(ymd.month()),
-                  static_cast<unsigned>(ymd.day()));
+    std::snprintf(buf, sizeof(buf), "%04d-%02u-%02u", static_cast<int>(ymd.year()),
+                  static_cast<unsigned>(ymd.month()), static_cast<unsigned>(ymd.day()));
     return std::string{buf};
 }
 

@@ -7,7 +7,7 @@ InstrumentId InstrumentTable::intern(std::string_view symbol) {
 
     const auto id = static_cast<InstrumentId>(static_cast<std::uint32_t>(by_id_.size()));
     // Own the characters first: the views below must point at stable storage.
-    const std::string&     owned = storage_.emplace_back(symbol);
+    const std::string& owned = storage_.emplace_back(symbol);
     const std::string_view view{owned};
     by_id_.push_back(view);
     index_.emplace(view, id);

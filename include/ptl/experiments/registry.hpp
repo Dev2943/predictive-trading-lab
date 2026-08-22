@@ -27,40 +27,40 @@ namespace ptl::experiments {
 namespace fs = std::filesystem;
 
 struct RunRecord {
-    std::string   run_id;
-    std::string   created_utc;
-    std::string   git_sha;
-    std::string   git_dirty;
-    std::string   config_hash;
-    std::string   config_canonical;
-    std::string   data_manifest_sha;
+    std::string run_id;
+    std::string created_utc;
+    std::string git_sha;
+    std::string git_dirty;
+    std::string config_hash;
+    std::string config_canonical;
+    std::string data_manifest_sha;
     std::uint64_t seed = 0;
-    std::string   compiler;
-    std::string   compiler_version;
-    std::string   build_type;
-    std::string   tag;
-    std::string   status = "started";  // started | completed | failed | invalidated
+    std::string compiler;
+    std::string compiler_version;
+    std::string build_type;
+    std::string tag;
+    std::string status = "started";  // started | completed | failed | invalidated
     std::uint64_t chain_violations = 0;
 };
 
 struct TrialRecord {
-    std::int64_t  trial_id = 0;  // assigned on insert
-    std::string   run_id;
-    std::string   research_question;
-    std::string   hypothesis;
-    std::string   params_json;
-    std::string   status = "planned";  // planned | run | abandoned
+    std::int64_t trial_id = 0;  // assigned on insert
+    std::string run_id;
+    std::string research_question;
+    std::string hypothesis;
+    std::string params_json;
+    std::string status = "planned";  // planned | run | abandoned
 };
 
 /// A search budget declared BEFORE evaluation begins. Declaring the number of
 /// trials up front is what makes the count meaningful; counting them afterwards
 /// measures persistence, not discipline.
 struct SearchBudget {
-    std::string   research_question;
-    std::string   declared_utc;
-    std::int64_t  budget = 0;
-    std::int64_t  used = 0;
-    std::string   rationale;
+    std::string research_question;
+    std::string declared_utc;
+    std::int64_t budget = 0;
+    std::int64_t used = 0;
+    std::string rationale;
 };
 
 class Registry {

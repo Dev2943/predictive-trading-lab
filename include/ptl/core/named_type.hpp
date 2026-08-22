@@ -49,7 +49,7 @@ public:
     constexpr NamedType() noexcept = default;
     constexpr explicit NamedType(T value) noexcept : value_(value) {}
 
-    [[nodiscard]] constexpr T&       get()       noexcept { return value_; }
+    [[nodiscard]] constexpr T& get() noexcept { return value_; }
     [[nodiscard]] constexpr const T& get() const noexcept { return value_; }
     [[nodiscard]] constexpr explicit operator T() const noexcept { return value_; }
 
@@ -63,9 +63,7 @@ private:
 
 template <class T>
 struct Addable {
-    [[nodiscard]] friend constexpr T operator+(T a, T b) noexcept {
-        return T{a.get() + b.get()};
-    }
+    [[nodiscard]] friend constexpr T operator+(T a, T b) noexcept { return T{a.get() + b.get()}; }
     constexpr T& operator+=(T other) noexcept {
         auto& self = static_cast<T&>(*this);
         self.get() += other.get();
@@ -75,9 +73,7 @@ struct Addable {
 
 template <class T>
 struct Subtractable {
-    [[nodiscard]] friend constexpr T operator-(T a, T b) noexcept {
-        return T{a.get() - b.get()};
-    }
+    [[nodiscard]] friend constexpr T operator-(T a, T b) noexcept { return T{a.get() - b.get()}; }
     constexpr T& operator-=(T other) noexcept {
         auto& self = static_cast<T&>(*this);
         self.get() -= other.get();
@@ -105,9 +101,7 @@ struct ScalarScalable {
 
 template <class T>
 struct Comparable {
-    [[nodiscard]] friend constexpr bool operator==(T a, T b) noexcept {
-        return a.get() == b.get();
-    }
+    [[nodiscard]] friend constexpr bool operator==(T a, T b) noexcept { return a.get() == b.get(); }
     [[nodiscard]] friend constexpr auto operator<=>(T a, T b) noexcept {
         return a.get() <=> b.get();
     }
@@ -127,8 +121,7 @@ namespace std {
 template <class T, class Tag, template <class> class... Skills>
     requires requires { ptl::NamedType<T, Tag, Skills...>::ptl_is_hashable; }
 struct hash<ptl::NamedType<T, Tag, Skills...>> {
-    [[nodiscard]] size_t operator()(
-        const ptl::NamedType<T, Tag, Skills...>& v) const noexcept {
+    [[nodiscard]] size_t operator()(const ptl::NamedType<T, Tag, Skills...>& v) const noexcept {
         return std::hash<T>{}(v.get());
     }
 };

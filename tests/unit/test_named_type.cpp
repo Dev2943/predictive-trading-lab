@@ -1,11 +1,9 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
-
-#include "support/ptl_catch.hpp"
-
 #include <type_traits>
 
 #include "ptl/core/types.hpp"
+#include "support/ptl_catch.hpp"
 
 using namespace ptl;
 

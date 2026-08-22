@@ -1,12 +1,10 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
-
-#include "support/ptl_catch.hpp"
-
 #include <string>
 #include <vector>
 
 #include "ptl/config/config.hpp"
+#include "support/ptl_catch.hpp"
 
 using namespace ptl;
 using namespace ptl::config;
@@ -37,6 +35,11 @@ level = "info"
 
 using Ov = std::vector<std::string>;
 
+namespace detail {
+template <class T>
+concept HasSessionBarCount = requires(T s) { s.tradable_bars_per_session(); };
+}  // namespace detail
+
 Config must_load(std::string_view text, std::vector<std::string> ov = {}) {
     auto r = load_from_string(text, ov, "<test>");
     REQUIRE(r.has_value());
@@ -49,7 +52,7 @@ TEST_CASE("minimal config loads with documented defaults", "[config]") {
     const Config c = must_load(kMinimal);
     REQUIRE(c.run.seed == 20240101);
     REQUIRE(c.run.tag == "unit");
-    REQUIRE(c.data.raw_dir == "data/raw");           // default
+    REQUIRE(c.data.raw_dir == "data/raw");  // default
     REQUIRE(c.t1.provider == "alpaca");
     REQUIRE(c.t1.timestamp_semantics == "bar_open_time");
     REQUIRE(c.databento.max_spend_usd == Catch::Approx(25.0));  // default
@@ -76,13 +79,13 @@ TEST_CASE("malformed TOML is reported with a line number", "[config]") {
 }
 
 TEST_CASE("dotted overrides apply with correct types", "[config]") {
-    const Config c = must_load(
-        kMinimal, {"run.seed=999", "log.level=debug", "data.databento.max_spend_usd=1.5",
-                   "market_session.exclude_opening_auction=false", "run.tag=swept"});
-    REQUIRE(c.run.seed == 999);                       // integer, not "999"
+    const Config c =
+        must_load(kMinimal, {"run.seed=999", "log.level=debug", "data.databento.max_spend_usd=1.5",
+                             "market_session.exclude_opening_auction=false", "run.tag=swept"});
+    REQUIRE(c.run.seed == 999);  // integer, not "999"
     REQUIRE(c.log.level == log::Level::Debug);
     REQUIRE(c.databento.max_spend_usd == Catch::Approx(1.5));  // double
-    REQUIRE_FALSE(c.session.exclude_opening_auction);           // bool
+    REQUIRE_FALSE(c.session.exclude_opening_auction);          // bool
     REQUIRE(c.run.tag == "swept");                             // string
 }
 
@@ -96,8 +99,8 @@ TEST_CASE("overrides are validated against the schema too", "[config]") {
 
 TEST_CASE("semantic validation rejects incoherent settings", "[config]") {
     REQUIRE_FALSE(load_from_string(kMinimal, Ov{"holdout.months=0"}, "<t>").has_value());
-    REQUIRE_FALSE(load_from_string(kMinimal, Ov{"data.databento.max_spend_usd=-1"}, "<t>")
-                      .has_value());
+    REQUIRE_FALSE(
+        load_from_string(kMinimal, Ov{"data.databento.max_spend_usd=-1"}, "<t>").has_value());
     REQUIRE_FALSE(load_from_string(kMinimal, Ov{"log.level=verbose"}, "<t>").has_value());
 
     // Unlocking the holdout without a written justification is refused. The
@@ -106,11 +109,10 @@ TEST_CASE("semantic validation rejects incoherent settings", "[config]") {
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().message.find("justification") != std::string::npos);
 
-    REQUIRE(load_from_string(
-                kMinimal,
-                Ov{"holdout.unlocked=true",
-                   "holdout.unlock_justification=research design frozen 2024-09-01"},
-                "<t>")
+    REQUIRE(load_from_string(kMinimal,
+                             Ov{"holdout.unlocked=true",
+                                "holdout.unlock_justification=research design frozen 2024-09-01"},
+                             "<t>")
                 .has_value());
 }
 
@@ -162,15 +164,27 @@ TEST_CASE("RunId responds to each of its four inputs", "[config][determinism]") 
     REQUIRE(make_run_id("ab", "c", "d", 1).value != make_run_id("a", "bc", "d", 1).value);
 }
 
-TEST_CASE("session bar count reflects auction exclusion", "[config]") {
-    // 390 left-edge minute bars over [09:30,16:00). Excluding the opening
-    // auction drops the 09:30 bar, leaving 389. Any feature written against a
-    // hardcoded 390 silently reaches across the overnight gap.
-    const Config on = must_load(kMinimal);
-    REQUIRE(on.session.tradable_bars_per_session() == 389);
+TEST_CASE("session settings are carried but session LENGTH is not computed here", "[config]") {
+    // Regression guard for review finding H-4. A previous revision exposed
+    // tradable_bars_per_session() returning 390 minus the opening auction. That
+    // is wrong on every half-day (Thanksgiving Friday, Christmas Eve, July 3
+    // close at 13:00 => 210 minutes) and ignored exclude_closing_auction
+    // entirely. Session length is a property of a DATE and belongs to
+    // ptl::market::Calendar in Phase 2.
+    //
+    // This test exists so that reintroducing the helper is a deliberate act
+    // rather than an accident: the config carries the default SCHEDULE, and
+    // nothing more.
+    const Config c = must_load(kMinimal);
+    REQUIRE(c.session.exclude_opening_auction);
+    REQUIRE(c.session.regular_open == "09:30:00");
+    REQUIRE(c.session.regular_close == "16:00:00");
 
-    const Config off = must_load(kMinimal, {"market_session.exclude_opening_auction=false"});
-    REQUIRE(off.session.tradable_bars_per_session() == 390);
+    // The concept must be a TEMPLATE. A requires-expression over a concrete
+    // type is not a SFINAE context -- the member lookup simply fails to
+    // compile rather than evaluating to false.
+    static_assert(!detail::HasSessionBarCount<SessionSection>,
+                  "session length must come from the calendar, not from config");
 }
 
 TEST_CASE("missing config file is reported not silently defaulted", "[config]") {

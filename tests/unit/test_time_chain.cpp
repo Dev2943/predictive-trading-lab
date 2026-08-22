@@ -1,8 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include "support/ptl_catch.hpp"
-
 #include "ptl/core/time.hpp"
+#include "support/ptl_catch.hpp"
 
 using namespace ptl;
 using namespace std::chrono;
@@ -20,14 +19,14 @@ Timestamp at(const char* text) {
 LifecycleTimes reference_chain() {
     const Timestamp bar_open = at("2024-01-02T14:52:00Z");
     LifecycleTimes t;
-    t.exchange_time    = bar_open;
-    t.receive_time     = bar_open + milliseconds{2};      // feed latency
-    t.feature_end_time = bar_open + seconds{60};          // bar CLOSE, not open
-    t.decision_time    = bar_open + seconds{60} + microseconds{300};
-    t.submitted_time   = t.decision_time + microseconds{250};
-    t.arrival_time     = t.submitted_time + milliseconds{1};
-    t.fill_time        = t.arrival_time + microseconds{80};
-    t.ack_time         = t.fill_time + milliseconds{1};
+    t.exchange_time = bar_open;
+    t.receive_time = bar_open + milliseconds{2};  // feed latency
+    t.feature_end_time = bar_open + seconds{60};  // bar CLOSE, not open
+    t.decision_time = bar_open + seconds{60} + microseconds{300};
+    t.submitted_time = t.decision_time + microseconds{250};
+    t.arrival_time = t.submitted_time + milliseconds{1};
+    t.fill_time = t.arrival_time + microseconds{80};
+    t.ack_time = t.fill_time + milliseconds{1};
     return t;
 }
 
@@ -42,7 +41,7 @@ TEST_CASE("partial chains validate over populated stages only", "[core][pit]") {
     // incomplete. One type must serve every point in the pipeline.
     LifecycleTimes t;
     t.exchange_time = at("2024-01-02T14:52:00Z");
-    t.receive_time  = t.exchange_time + milliseconds{2};
+    t.receive_time = t.exchange_time + milliseconds{2};
     REQUIRE_FALSE(validate_chain(t).has_value());
 
     LifecycleTimes empty;
@@ -52,8 +51,8 @@ TEST_CASE("partial chains validate over populated stages only", "[core][pit]") {
 TEST_CASE("every adjacent stage inversion is detected", "[core][pit]") {
     struct Case {
         const char* name;
-        Stage       earlier;
-        Stage       later;
+        Stage earlier;
+        Stage later;
     };
     const Case cases[] = {
         {"feed", Stage::ExchangeTime, Stage::ReceiveTime},
@@ -112,7 +111,7 @@ TEST_CASE("zero compute latency is legal but zero arrival latency is not", "[cor
 TEST_CASE("EventTime exposes feed latency", "[core][pit]") {
     EventTime e;
     e.exchange_time = at("2024-01-02T14:52:00Z");
-    e.receive_time  = e.exchange_time + milliseconds{3};
+    e.receive_time = e.exchange_time + milliseconds{3};
     REQUIRE(e.ok());
     REQUIRE(e.feed_latency() == milliseconds{3});
 
@@ -130,13 +129,13 @@ TEST_CASE("observation intervals detect label overlap", "[core][pit][validation]
     // catches them.
     ObservationInterval obs;
     obs.sample_start_time = at("2024-01-02T14:00:00Z");
-    obs.feature_end_time  = at("2024-01-02T14:52:00Z");
-    obs.label_start_time  = at("2024-01-02T14:52:00Z");
-    obs.label_end_time    = at("2024-01-02T15:07:00Z");
+    obs.feature_end_time = at("2024-01-02T14:52:00Z");
+    obs.label_start_time = at("2024-01-02T14:52:00Z");
+    obs.label_end_time = at("2024-01-02T15:07:00Z");
     REQUIRE(obs.ok());
 
     const Timestamp test_begin = at("2024-01-02T15:00:00Z");
-    const Timestamp test_end   = at("2024-01-02T16:00:00Z");
+    const Timestamp test_end = at("2024-01-02T16:00:00Z");
 
     // The label ENDS inside the test window: contaminated, must be purged --
     // even though feature_end_time is comfortably before the test start.
@@ -157,13 +156,13 @@ TEST_CASE("observation intervals detect label overlap", "[core][pit][validation]
 TEST_CASE("malformed observation intervals are rejected", "[core][pit][validation]") {
     ObservationInterval obs;
     obs.sample_start_time = at("2024-01-02T14:00:00Z");
-    obs.feature_end_time  = at("2024-01-02T14:52:00Z");
-    obs.label_start_time  = at("2024-01-02T14:30:00Z");  // before features end
-    obs.label_end_time    = at("2024-01-02T15:07:00Z");
+    obs.feature_end_time = at("2024-01-02T14:52:00Z");
+    obs.label_start_time = at("2024-01-02T14:30:00Z");  // before features end
+    obs.label_end_time = at("2024-01-02T15:07:00Z");
     REQUIRE_FALSE(obs.ok());
 
     obs.label_start_time = obs.feature_end_time;
-    obs.label_end_time   = obs.label_start_time;  // zero-length label
+    obs.label_end_time = obs.label_start_time;  // zero-length label
     REQUIRE_FALSE(obs.ok());
 }
 

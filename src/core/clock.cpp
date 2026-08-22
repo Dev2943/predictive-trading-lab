@@ -10,9 +10,8 @@ void SimulatedClock::advance_to(Timestamp ts) {
         // Loud rather than silent. An event feed that goes backwards means the
         // merge is broken or the data is unsorted, and either way every
         // downstream point-in-time guarantee is void. Clamping would hide it.
-        throw std::logic_error(
-            "SimulatedClock::advance_to moved backwards: from " + to_iso8601(now_) +
-            " to " + to_iso8601(ts));
+        throw std::logic_error("SimulatedClock::advance_to moved backwards: from " +
+                               to_iso8601(now_) + " to " + to_iso8601(ts));
     }
     now_ = ts;
 }

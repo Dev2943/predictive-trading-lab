@@ -1,13 +1,11 @@
+#include <array>
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
-
-#include "support/ptl_catch.hpp"
-
-#include <array>
 #include <cmath>
 #include <vector>
 
 #include "ptl/core/rng.hpp"
+#include "support/ptl_catch.hpp"
 
 using namespace ptl;
 
@@ -20,8 +18,8 @@ TEST_CASE("rng sequence is a fixed function of the seed", "[core][rng][determini
     // fails, either the engine changed or someone reached for <random>, and
     // every previously recorded RunId is now unreproducible.
     DeterministicRng rng{20240101};
-    const std::array<std::uint64_t, 4> expected{
-        0xd05ef55272cdfb14ULL, 0x2e2f422341add64eULL, 0x1c120f3d1ce63170ULL, 0x760a212e6c3beec9ULL};
+    const std::array<std::uint64_t, 4> expected{0xd05ef55272cdfb14ULL, 0x2e2f422341add64eULL,
+                                                0x1c120f3d1ce63170ULL, 0x760a212e6c3beec9ULL};
     for (std::size_t i = 0; i < expected.size(); ++i) {
         INFO("draw " << i);
         REQUIRE(rng.next_u64() == expected[i]);

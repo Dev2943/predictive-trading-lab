@@ -1,12 +1,10 @@
 #include <catch2/catch_test_macros.hpp>
-
-#include "support/ptl_catch.hpp"
-
 #include <chrono>
 #include <filesystem>
 #include <string>
 
 #include "ptl/experiments/registry.hpp"
+#include "support/ptl_catch.hpp"
 
 using namespace ptl;
 using namespace ptl::experiments;
@@ -20,9 +18,9 @@ struct TempDb {
         // the suite must build unchanged on macOS, Linux and Windows.
         const auto stamp = static_cast<unsigned long long>(
             std::chrono::steady_clock::now().time_since_epoch().count());
-        path = std::filesystem::temp_directory_path() /
-               ("ptl_registry_test_" + std::to_string(stamp) + "_" +
-                std::to_string(counter_++) + ".sqlite");
+        path =
+            std::filesystem::temp_directory_path() / ("ptl_registry_test_" + std::to_string(stamp) +
+                                                      "_" + std::to_string(counter_++) + ".sqlite");
         std::filesystem::remove(path);
     }
     ~TempDb() {

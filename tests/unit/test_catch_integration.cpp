@@ -1,13 +1,11 @@
 #include <catch2/catch_test_macros.hpp>
-
-#include "support/ptl_catch.hpp"
-
 #include <chrono>
 #include <string>
 #include <type_traits>
 
 #include "ptl/core/time.hpp"
 #include "ptl/core/types.hpp"
+#include "support/ptl_catch.hpp"
 
 using namespace ptl;
 
@@ -28,8 +26,7 @@ using namespace ptl;
 static_assert(std::is_same_v<Timestamp::duration, std::chrono::nanoseconds>,
               "ptl::Timestamp must be nanosecond-resolution on every platform");
 static_assert(std::is_same_v<Timestamp::clock, std::chrono::system_clock>);
-static_assert(Duration::period::den == 1000000000,
-              "ptl::Duration must be nanoseconds");
+static_assert(Duration::period::den == 1000000000, "ptl::Duration must be nanoseconds");
 
 // ---------------------------------------------------------------------------
 // StringMaker selection
@@ -72,8 +69,7 @@ TEST_CASE("strong typedefs render with their value", "[core][types][portability]
     REQUIRE(Catch::Detail::stringify(Qty{100.0}).find("100") != std::string::npos);
 }
 
-TEST_CASE("enums render by name rather than by ordinal",
-          "[core][pit][portability]") {
+TEST_CASE("enums render by name rather than by ordinal", "[core][pit][portability]") {
     REQUIRE(Catch::Detail::stringify(Stage::ArrivalTime) == "arrival_time");
     REQUIRE(Catch::Detail::stringify(Stage::DecisionTime) == "decision_time");
     REQUIRE(Catch::Detail::stringify(Side::Buy) == "BUY");
@@ -81,8 +77,7 @@ TEST_CASE("enums render by name rather than by ordinal",
     REQUIRE(Catch::Detail::stringify(InstrumentId{7}) == "InstrumentId(7)");
 }
 
-TEST_CASE("a failing timestamp comparison would report both instants",
-          "[core][pit][portability]") {
+TEST_CASE("a failing timestamp comparison would report both instants", "[core][pit][portability]") {
     // Exercises the exact path that broke: comparing two nanosecond
     // time_points inside a Catch2 assertion, which is what forces StringMaker
     // to be instantiated in the first place.

@@ -37,7 +37,6 @@
 /// implicitly instantiate the primary template.
 
 #include <catch2/catch_tostring.hpp>
-
 #include <chrono>
 #include <string>
 

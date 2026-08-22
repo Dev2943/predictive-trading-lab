@@ -55,17 +55,17 @@ public:
 
 private:
     std::array<std::uint64_t, 4> s_{};
-    std::uint64_t                seed_{};
-    double                       spare_normal_{0.0};
-    bool                         has_spare_{false};
+    std::uint64_t seed_{};
+    double spare_normal_{0.0};
+    bool has_spare_{false};
 };
 
 /// Stream ids. Append only -- never renumber, or historical runs stop
 /// reproducing.
-inline constexpr std::uint64_t kStreamLatency   = 1;
-inline constexpr std::uint64_t kStreamSlippage  = 2;
-inline constexpr std::uint64_t kStreamFillProb  = 3;
-inline constexpr std::uint64_t kStreamIntrabar  = 4;
+inline constexpr std::uint64_t kStreamLatency = 1;
+inline constexpr std::uint64_t kStreamSlippage = 2;
+inline constexpr std::uint64_t kStreamFillProb = 3;
+inline constexpr std::uint64_t kStreamIntrabar = 4;
 inline constexpr std::uint64_t kStreamBootstrap = 5;
 
 }  // namespace ptl

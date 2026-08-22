@@ -81,7 +81,7 @@ struct LifecycleTimes {
     Timestamp ack_time{kNoTimestamp};
 
     [[nodiscard]] Timestamp at(Stage s) const noexcept;
-    void                    set(Stage s, Timestamp ts) noexcept;
+    void set(Stage s, Timestamp ts) noexcept;
 };
 
 enum class ChainRule : std::uint8_t {
@@ -90,8 +90,8 @@ enum class ChainRule : std::uint8_t {
 };
 
 struct ChainViolation {
-    Stage     earlier{Stage::ExchangeTime};
-    Stage     later{Stage::ReceiveTime};
+    Stage earlier{Stage::ExchangeTime};
+    Stage later{Stage::ReceiveTime};
     Timestamp earlier_ts{kNoTimestamp};
     Timestamp later_ts{kNoTimestamp};
     ChainRule rule{ChainRule::Monotonic};
@@ -118,8 +118,8 @@ struct ChainViolation {
 /// is counted rather than asserted. A non-zero value at the end of a run
 /// invalidates that run and is recorded in the manifest.
 [[nodiscard]] std::uint64_t chain_violation_count() noexcept;
-void                        record_chain_violation() noexcept;
-void                        reset_chain_violation_count() noexcept;
+void record_chain_violation() noexcept;
+void reset_chain_violation_count() noexcept;
 
 // ---------------------------------------------------------------------------
 // Label intervals
@@ -139,8 +139,8 @@ struct ObservationInterval {
     Timestamp label_end_time{kNoTimestamp};
 
     [[nodiscard]] constexpr bool ok() const noexcept {
-        return sample_start_time <= feature_end_time &&
-               feature_end_time <= label_start_time && label_start_time < label_end_time;
+        return sample_start_time <= feature_end_time && feature_end_time <= label_start_time &&
+               label_start_time < label_end_time;
     }
 
     /// Half-open overlap against [begin, end).

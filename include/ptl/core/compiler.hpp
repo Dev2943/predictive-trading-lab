@@ -16,18 +16,18 @@
 // build. An untested fallback is worse than no fallback: it fails only on the
 // machine that needed it, which is by definition the machine you cannot debug.
 #if defined(PTL_FORCE_RESULT_FALLBACK) && PTL_FORCE_RESULT_FALLBACK
-#  define PTL_HAS_STD_EXPECTED 0
+#define PTL_HAS_STD_EXPECTED 0
 #elif defined(__cpp_lib_expected) && __cpp_lib_expected >= 202202L
-#  define PTL_HAS_STD_EXPECTED 1
+#define PTL_HAS_STD_EXPECTED 1
 #else
-#  define PTL_HAS_STD_EXPECTED 0
+#define PTL_HAS_STD_EXPECTED 0
 #endif
 
 // std::format -- libc++ 17, libstdc++ 13.
 #if defined(__cpp_lib_format) && __cpp_lib_format >= 201907L
-#  define PTL_HAS_STD_FORMAT 1
+#define PTL_HAS_STD_FORMAT 1
 #else
-#  define PTL_HAS_STD_FORMAT 0
+#define PTL_HAS_STD_FORMAT 0
 #endif
 
 // std::chrono time-zone database (std::chrono::tzdb, zoned_time).
@@ -39,17 +39,17 @@
 // also what production systems do -- it removes a runtime dependency on the
 // host tz database and keeps the simulation bit-reproducible across machines.
 #if defined(__cpp_lib_chrono) && __cpp_lib_chrono >= 201907L
-#  define PTL_HAS_CHRONO_TZDB 1
+#define PTL_HAS_CHRONO_TZDB 1
 #else
-#  define PTL_HAS_CHRONO_TZDB 0
+#define PTL_HAS_CHRONO_TZDB 0
 #endif
 
 #if defined(_MSC_VER)
-#  define PTL_ALWAYS_INLINE __forceinline
-#  define PTL_NOINLINE      __declspec(noinline)
+#define PTL_ALWAYS_INLINE __forceinline
+#define PTL_NOINLINE __declspec(noinline)
 #else
-#  define PTL_ALWAYS_INLINE inline __attribute__((always_inline))
-#  define PTL_NOINLINE      __attribute__((noinline))
+#define PTL_ALWAYS_INLINE inline __attribute__((always_inline))
+#define PTL_NOINLINE __attribute__((noinline))
 #endif
 
 namespace ptl {
