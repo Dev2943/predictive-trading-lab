@@ -1,0 +1,70 @@
+# predictive-trading-lab -- base configuration.
+#
+# Loaded strictly: an unrecognised key is a hard error, not a warning. A
+# mistyped key that silently does nothing is a reproducibility bug, because the
+# manifest then records a setting the run never applied.
+#
+# The canonical (sorted, fully-dotted, comment-free) form of this file feeds the
+# config hash, which feeds the RunId. Comments and key order do not affect it.
+
+[run]
+seed = 20240101
+results_dir = "results"
+tag = "phase1-skeleton"
+fail_on_validation_warning = false
+
+[data]
+raw_dir = "data/raw"
+normalized_dir = "data/normalized"
+reference_dir = "data/reference"
+cache_dir = "data/cache"
+
+# --- Tier provenance (ADR-0001). Persisted verbatim into the run manifest so a
+# --- result set records exactly which feed and schema produced it.
+
+[data.t1]
+provider = "alpaca"
+feed = "sip"
+schema = "ohlcv-1m"
+timestamp_semantics = "bar_open_time"   # LEFT EDGE -- see ADR-0001 bar policy
+coverage = "consolidated_sip_historical"
+historical_end_delay_minutes = 15
+
+[data.t2]
+provider = "databento"
+schema = "cbbo-1m"                      # cbbo, NOT bbo: bbo is publisher-scoped
+timestamp_semantics = "interval_end_ts_recv"
+coverage = "consolidated_best_bid_offer"
+
+[data.t3]
+provider = "databento"
+schema = "cbbo-1s"
+timestamp_semantics = "interval_end_ts_recv"
+coverage = "consolidated_best_bid_offer"
+
+[data.databento]
+max_spend_usd = 25.00
+require_explicit_paid_override = true
+
+[market_session]
+# PROVENANCE ONLY. Consumed by the offline calendar generator, never by the
+# engine: no runtime time-zone lookup exists anywhere (ADR-0001 Addendum A1).
+timezone = "America/New_York"
+regular_open = "09:30:00"
+regular_close = "16:00:00"
+exclude_opening_auction = true
+exclude_closing_auction = true
+
+[holdout]
+# Fixed BEFORE any data is examined and hashed into the RunId, so it cannot be
+# quietly moved after seeing results. Filled in at Phase 2 ingest.
+boundary_date = ""
+months = 4
+unlocked = false
+unlock_justification = ""
+
+[log]
+level = "info"
+file = ""
+console = true
+json = true

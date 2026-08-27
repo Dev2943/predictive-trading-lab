@@ -1,0 +1,180 @@
+#include <catch2/catch_test_macros.hpp>
+#include <chrono>
+#include <memory>
+#include <string>
+#include <type_traits>
+
+#include "ptl/core/result.hpp"
+#include "ptl/core/time.hpp"
+#include "ptl/core/types.hpp"
+#include "support/ptl_catch.hpp"
+
+using namespace ptl;
+
+// ---------------------------------------------------------------------------
+// Platform assumption guard
+// ---------------------------------------------------------------------------
+//
+// ptl::Timestamp is time_point<system_clock, nanoseconds> EXPLICITLY. It is not
+// system_clock::time_point, and that distinction is load-bearing:
+//
+//     libstdc++ : system_clock::duration == nanoseconds
+//     libc++    : system_clock::duration == microseconds
+//
+// Had we written system_clock::time_point, the engine would silently carry
+// nanosecond resolution on Linux and microsecond resolution on macOS. Every
+// sub-microsecond latency model, every event ordering inside a millisecond, and
+// therefore the byte-identical determinism guarantee, would differ by platform.
+static_assert(std::is_same_v<Timestamp::duration, std::chrono::nanoseconds>,
+              "ptl::Timestamp must be nanosecond-resolution on every platform");
+static_assert(std::is_same_v<Timestamp::clock, std::chrono::system_clock>);
+static_assert(Duration::period::den == 1000000000, "ptl::Duration must be nanoseconds");
+
+// ---------------------------------------------------------------------------
+// StringMaker selection
+// ---------------------------------------------------------------------------
+
+TEST_CASE("our Timestamp StringMaker wins over the Catch2 partial one",
+          "[core][pit][portability]") {
+    // THE REGRESSION TEST FOR THE macOS BUILD FAILURE.
+    //
+    // Catch2 provides a partial specialisation for
+    // time_point<system_clock, Duration> whose convert() calls to_time_t().
+    // On libc++ that fails to compile for a nanosecond time_point, because
+    // system_clock::duration is microseconds there and chrono will not narrow
+    // implicitly.
+    //
+    // Our explicit specialisation is more specialised, so it is selected and
+    // Catch2's is never instantiated -- on any standard library. Asserting on
+    // the *format* of the rendered string is what proves selection: Catch2's
+    // version emits a second-resolution date, ours emits ISO-8601 with all nine
+    // fractional digits. If this assertion ever fails, macOS builds break.
+    Timestamp ts{};
+    REQUIRE(parse_timestamp("2024-01-02T14:52:00.123456789Z", ts));
+
+    const std::string rendered = Catch::Detail::stringify(ts);
+    REQUIRE(rendered == "2024-01-02T14:52:00.123456789Z");
+    REQUIRE(rendered == to_iso8601(ts));
+    // Nanoseconds survive. Catch2's default would have discarded them.
+    REQUIRE(rendered.find("123456789") != std::string::npos);
+}
+
+TEST_CASE("sentinel timestamps render readably", "[core][pit][portability]") {
+    REQUIRE(Catch::Detail::stringify(kNoTimestamp) == "<unset>");
+    REQUIRE(Catch::Detail::stringify(kMaxTimestamp) == "<max>");
+}
+
+TEST_CASE("strong typedefs render with their value", "[core][types][portability]") {
+    // A failure message should say which value was wrong, not print an opaque
+    // object address or fall back to "{?}".
+    REQUIRE(Catch::Detail::stringify(Price{512.25}).find("512.25") != std::string::npos);
+    REQUIRE(Catch::Detail::stringify(Qty{100.0}).find("100") != std::string::npos);
+}
+
+TEST_CASE("enums render by name rather than by ordinal", "[core][pit][portability]") {
+    REQUIRE(Catch::Detail::stringify(Stage::ArrivalTime) == "arrival_time");
+    REQUIRE(Catch::Detail::stringify(Stage::DecisionTime) == "decision_time");
+    REQUIRE(Catch::Detail::stringify(Side::Buy) == "BUY");
+    REQUIRE(Catch::Detail::stringify(ChainRule::StrictlyAfter) == "StrictlyAfter");
+    REQUIRE(Catch::Detail::stringify(InstrumentId{7}) == "InstrumentId(7)");
+}
+
+TEST_CASE("a failing timestamp comparison would report both instants", "[core][pit][portability]") {
+    // Exercises the exact path that broke: comparing two nanosecond
+    // time_points inside a Catch2 assertion, which is what forces StringMaker
+    // to be instantiated in the first place.
+    Timestamp a{};
+    Timestamp b{};
+    REQUIRE(parse_timestamp("2024-01-02T14:52:00.000000000Z", a));
+    REQUIRE(parse_timestamp("2024-01-02T14:52:00.000000001Z", b));
+    REQUIRE(a != b);
+    REQUIRE(a < b);
+    REQUIRE(Catch::Detail::stringify(a) != Catch::Detail::stringify(b));
+}
+
+// ---------------------------------------------------------------------------
+// Result must work with types that have no public default constructor
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// Mirrors the shape of Calendar, Bar, Quote and friends: private default
+/// constructor, so every instance is forced through a validating factory.
+class FactoryOnly {
+public:
+    static ptl::Result<FactoryOnly> create(int v) {
+        if (v < 0) return fail(make_error(ErrorCode::InvalidArgument, "negative"));
+        FactoryOnly f;
+        f.value_ = v;
+        return f;
+    }
+    [[nodiscard]] int value() const noexcept { return value_; }
+
+private:
+    FactoryOnly() = default;
+    int value_ = 0;
+};
+
+/// Move-only as well, like ReplaySource and FileCredentials.
+class MoveOnlyFactory {
+public:
+    static ptl::Result<MoveOnlyFactory> create(std::string s) {
+        MoveOnlyFactory m;
+        m.data_ = std::make_unique<std::string>(std::move(s));
+        return m;
+    }
+    MoveOnlyFactory(MoveOnlyFactory&&) = default;
+    MoveOnlyFactory& operator=(MoveOnlyFactory&&) = default;
+    [[nodiscard]] const std::string& data() const { return *data_; }
+
+private:
+    MoveOnlyFactory() = default;
+    std::unique_ptr<std::string> data_;
+};
+
+}  // namespace
+
+static_assert(!std::is_default_constructible_v<FactoryOnly>,
+              "the point of this fixture is that it cannot be default-constructed");
+static_assert(!std::is_copy_constructible_v<MoveOnlyFactory>);
+
+TEST_CASE("Result carries types whose default constructor is private",
+          "[core][result][portability]") {
+    // REGRESSION FOR THE FALLBACK STORAGE BUG.
+    //
+    // The ptl::Result fallback originally stored `T value_{}`, which requires T
+    // to be default-constructible. That made it unusable for exactly the types
+    // whose invariants matter most -- the ones with private constructors and
+    // validating factories. std::expected has no such requirement, so the
+    // failure appeared ONLY on the older-Xcode path, which is the hardest one
+    // to notice.
+    //
+    // The fix was to change the container, not to relax the invariant.
+    auto ok = FactoryOnly::create(42);
+    REQUIRE(ok.has_value());
+    REQUIRE(ok->value() == 42);
+    REQUIRE((*ok).value() == 42);
+
+    auto bad = FactoryOnly::create(-1);
+    REQUIRE_FALSE(bad.has_value());
+    REQUIRE(bad.error().code == ErrorCode::InvalidArgument);
+}
+
+TEST_CASE("Result carries move-only factory types", "[core][result][portability]") {
+    auto r = MoveOnlyFactory::create("payload");
+    REQUIRE(r.has_value());
+    REQUIRE(r->data() == "payload");
+
+    MoveOnlyFactory taken = std::move(*r);
+    REQUIRE(taken.data() == "payload");
+}
+
+TEST_CASE("Result works for plain values too", "[core][result][portability]") {
+    Result<bool> t = true;
+    REQUIRE(t.has_value());
+    REQUIRE(*t);
+
+    Result<int> e = fail(make_error(ErrorCode::NotFound, "gone"));
+    REQUIRE_FALSE(e.has_value());
+    REQUIRE(e.error().message == "gone");
+}
