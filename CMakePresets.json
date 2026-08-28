@@ -1,0 +1,97 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 24, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "generator": "Ninja",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "PTL_BUILD_TESTS": "ON"
+      }
+    },
+    {
+      "name": "macos-debug",
+      "displayName": "macOS AppleClang Debug",
+      "inherits": "base",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Darwin" },
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "PTL_ENABLE_TRACE": "ON" }
+    },
+    {
+      "name": "macos-release",
+      "displayName": "macOS AppleClang Release",
+      "inherits": "base",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Darwin" },
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo", "PTL_NATIVE_ARCH": "ON" }
+    },
+    {
+      "name": "linux-gcc-release",
+      "displayName": "Linux GCC Release",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_C_COMPILER": "gcc", "CMAKE_CXX_COMPILER": "g++"
+      }
+    },
+    {
+      "name": "linux-clang-debug",
+      "displayName": "Linux Clang Debug",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_C_COMPILER": "clang", "CMAKE_CXX_COMPILER": "clang++",
+        "PTL_ENABLE_TRACE": "ON"
+      }
+    },
+    {
+      "name": "asan-ubsan",
+      "displayName": "AddressSanitizer + UndefinedBehaviorSanitizer",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "PTL_SANITIZER": "address+undefined",
+        "PTL_ENABLE_TRACE": "ON"
+      }
+    },
+    {
+      "name": "tsan",
+      "displayName": "ThreadSanitizer (no threads yet -- reserved)",
+      "inherits": "base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "PTL_SANITIZER": "thread" }
+    },
+    {
+      "name": "coverage",
+      "displayName": "Coverage",
+      "inherits": "base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "PTL_COVERAGE": "ON" }
+    },
+    {
+      "name": "benchmark",
+      "displayName": "Benchmarks",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "PTL_BUILD_BENCHMARKS": "ON",
+        "PTL_BUILD_TESTS": "OFF",
+        "PTL_NATIVE_ARCH": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "macos-debug",       "configurePreset": "macos-debug" },
+    { "name": "macos-release",     "configurePreset": "macos-release" },
+    { "name": "linux-gcc-release", "configurePreset": "linux-gcc-release" },
+    { "name": "linux-clang-debug", "configurePreset": "linux-clang-debug" },
+    { "name": "asan-ubsan",        "configurePreset": "asan-ubsan" },
+    { "name": "coverage",          "configurePreset": "coverage" },
+    { "name": "benchmark",         "configurePreset": "benchmark" }
+  ],
+  "testPresets": [
+    { "name": "macos-debug",       "configurePreset": "macos-debug",       "output": { "outputOnFailure": true } },
+    { "name": "linux-gcc-release", "configurePreset": "linux-gcc-release", "output": { "outputOnFailure": true } },
+    { "name": "linux-clang-debug", "configurePreset": "linux-clang-debug", "output": { "outputOnFailure": true } },
+    { "name": "asan-ubsan",        "configurePreset": "asan-ubsan",        "output": { "outputOnFailure": true } }
+  ]
+}
