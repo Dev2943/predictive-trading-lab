@@ -1314,3 +1314,201 @@ BENCHMARK(BM_ReportGeneration)
     ->Arg(static_cast<int>(ptl::report::Format::Markdown));
 
 }  // namespace
+
+// ---------------------------------------------------------------------------
+// Phase 11: portfolio optimization
+// ---------------------------------------------------------------------------
+//
+// Optimization runs once per rebalance, not per bar, so microseconds are
+// acceptable here in a way they would not be on the quote path. What matters is
+// how the cost scales with universe size, since that is what decides whether a
+// 500-name book is tractable.
+
+#include "ptl/optimization/optimizer.hpp"
+
+namespace {
+
+[[nodiscard]] std::vector<double> opt_returns(std::size_t rows, std::size_t assets) {
+    std::vector<double> out;
+    out.reserve(rows * assets);
+    for (std::size_t r = 0; r < rows; ++r) {
+        for (std::size_t c = 0; c < assets; ++c) {
+            out.push_back(std::sin(static_cast<double>(r) * 0.3 + static_cast<double>(c)) * 0.01);
+        }
+    }
+    return out;
+}
+
+[[nodiscard]] ptl::optimization::SymmetricMatrix opt_cov(std::size_t n) {
+    ptl::optimization::SymmetricMatrix cov{n};
+    for (std::size_t i = 0; i < n; ++i) {
+        for (std::size_t j = i; j < n; ++j) {
+            const double v = i == j ? 0.02 + 0.01 * static_cast<double>(i % 5) : 0.004;
+            cov.set_symmetric(i, j, v);
+        }
+    }
+    return cov;
+}
+
+[[nodiscard]] ptl::optimization::OptimizationInput opt_input(std::size_t n) {
+    ptl::optimization::OptimizationInput in;
+    (void)ptl::parse_timestamp("2024-07-02T15:00:00Z", in.as_of);
+    for (std::size_t i = 0; i < n; ++i) {
+        in.instruments.push_back(static_cast<ptl::InstrumentId>(i));
+    }
+    in.covariance = opt_cov(n);
+    in.expected_returns.reserve(n);
+    in.volatilities.reserve(n);
+    in.signals.reserve(n);
+    for (std::size_t i = 0; i < n; ++i) {
+        in.expected_returns.push_back(0.01 + 0.001 * static_cast<double>(i % 7));
+        in.volatilities.push_back(std::sqrt(in.covariance.at(i, i)));
+        in.signals.push_back(std::sin(static_cast<double>(i)) * 0.5);
+    }
+    return in;
+}
+
+[[nodiscard]] ptl::optimization::OptimizerConfig opt_config() {
+    ptl::optimization::OptimizerConfig cfg;
+    cfg.constraints = ptl::optimization::ConstraintSet::long_only(0.20);
+    cfg.max_iterations = 200;
+    return cfg;
+}
+
+void BM_CovarianceBuild(benchmark::State& state) {
+    const auto assets = static_cast<std::size_t>(state.range(0));
+    const std::size_t rows = 500;
+    const auto observations = opt_returns(rows, assets);
+
+    ptl::optimization::CovarianceConfig cfg;
+    cfg.method = ptl::optimization::CovarianceMethod::Shrinkage;
+    cfg.min_observations_ratio = 0.0;
+
+    for (auto _ : state) {
+        ptl::optimization::CovarianceEstimator estimator{cfg};
+        auto cov = estimator.estimate(observations, rows, assets);
+        benchmark::DoNotOptimize(cov.has_value());
+    }
+    state.SetItemsProcessed(state.iterations() * state.range(0));
+}
+BENCHMARK(BM_CovarianceBuild)->Arg(10)->Arg(50);
+
+/// PSD repair is the expensive part of covariance construction: a full Jacobi
+/// eigendecomposition, cubic in the universe size.
+void BM_PsdEnforcement(benchmark::State& state) {
+    const auto n = static_cast<std::size_t>(state.range(0));
+    auto cov = opt_cov(n);
+    // Make it indefinite so the repair path actually runs.
+    cov.set_symmetric(0, 1, 10.0);
+
+    for (auto _ : state) {
+        auto fixed = ptl::optimization::CovarianceEstimator::enforce_psd(cov, 1e-10);
+        benchmark::DoNotOptimize(fixed.has_value());
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_PsdEnforcement)->Arg(10)->Arg(50);
+
+void BM_EqualWeight(benchmark::State& state) {
+    const ptl::optimization::EqualWeightOptimizer optimizer{opt_config()};
+    const auto input = opt_input(static_cast<std::size_t>(state.range(0)));
+    for (auto _ : state) {
+        auto r = optimizer.optimize(input);
+        benchmark::DoNotOptimize(r.has_value());
+    }
+    state.SetItemsProcessed(state.iterations() * state.range(0));
+}
+BENCHMARK(BM_EqualWeight)->Arg(50);
+
+void BM_MeanVariance(benchmark::State& state) {
+    const ptl::optimization::MeanVarianceOptimizer optimizer{opt_config()};
+    const auto input = opt_input(static_cast<std::size_t>(state.range(0)));
+    for (auto _ : state) {
+        auto r = optimizer.optimize(input);
+        benchmark::DoNotOptimize(r.has_value());
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_MeanVariance)->Arg(10)->Arg(50);
+
+void BM_RiskParity(benchmark::State& state) {
+    const ptl::optimization::RiskParityOptimizer optimizer{opt_config()};
+    const auto input = opt_input(static_cast<std::size_t>(state.range(0)));
+    for (auto _ : state) {
+        auto r = optimizer.optimize(input);
+        benchmark::DoNotOptimize(r.has_value());
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_RiskParity)->Arg(10)->Arg(50);
+
+void BM_MaxSharpe(benchmark::State& state) {
+    const ptl::optimization::MaximumSharpeOptimizer optimizer{opt_config()};
+    const auto input = opt_input(static_cast<std::size_t>(state.range(0)));
+    for (auto _ : state) {
+        auto r = optimizer.optimize(input);
+        benchmark::DoNotOptimize(r.has_value());
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_MaxSharpe)->Arg(10)->Arg(50);
+
+void BM_TargetVolatility(benchmark::State& state) {
+    const ptl::optimization::TargetVolatilityOptimizer optimizer{opt_config()};
+    const auto input = opt_input(static_cast<std::size_t>(state.range(0)));
+    for (auto _ : state) {
+        auto r = optimizer.optimize(input);
+        benchmark::DoNotOptimize(r.has_value());
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_TargetVolatility)->Arg(10)->Arg(50);
+
+/// Constraint projection alone: it runs inside every solver iteration, so its
+/// cost is multiplied by the iteration count.
+void BM_ConstraintProjection(benchmark::State& state) {
+    const auto n = static_cast<std::size_t>(state.range(0));
+    auto input = opt_input(n);
+    input.sectors.reserve(n);
+    for (std::size_t i = 0; i < n; ++i) {
+        input.sectors.push_back(static_cast<std::int32_t>(i % 5));
+    }
+    const ptl::optimization::ConstraintProjector projector{
+        ptl::optimization::ConstraintSet::long_only(0.20)};
+
+    for (auto _ : state) {
+        std::vector<double> w(n, 1.0 / static_cast<double>(n));
+        benchmark::DoNotOptimize(projector.project(w, input, nullptr).has_value());
+    }
+    state.SetItemsProcessed(state.iterations() * state.range(0));
+}
+BENCHMARK(BM_ConstraintProjection)->Arg(50);
+
+/// End to end: estimate the risk model, then optimize against it. What a
+/// rebalance actually pays.
+void BM_EndToEndOptimization(benchmark::State& state) {
+    const auto assets = static_cast<std::size_t>(state.range(0));
+    const std::size_t rows = 500;
+    const auto observations = opt_returns(rows, assets);
+
+    ptl::optimization::CovarianceConfig cov_cfg;
+    cov_cfg.method = ptl::optimization::CovarianceMethod::Shrinkage;
+    cov_cfg.min_observations_ratio = 0.0;
+
+    const ptl::optimization::MaximumSharpeOptimizer optimizer{opt_config()};
+
+    for (auto _ : state) {
+        ptl::optimization::CovarianceEstimator estimator{cov_cfg};
+        auto cov = estimator.estimate(observations, rows, assets);
+        if (!cov) continue;
+
+        auto input = opt_input(assets);
+        input.covariance = *cov;
+        auto result = optimizer.optimize(input);
+        benchmark::DoNotOptimize(result.has_value());
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_EndToEndOptimization)->Arg(10)->Arg(50);
+
+}  // namespace

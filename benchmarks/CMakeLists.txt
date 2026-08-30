@@ -12,7 +12,7 @@
 
 add_executable(ptl_bench_core bench_core.cpp)
 target_link_libraries(ptl_bench_core PRIVATE
-    ptl::core ptl::oms ptl::portfolio ptl::risk ptl::execution ptl::market ptl::features ptl::labels ptl::validation ptl::research ptl::signal ptl::sizing ptl::construction ptl::pipeline ptl::databento ptl::algo ptl::report
+    ptl::core ptl::oms ptl::portfolio ptl::risk ptl::execution ptl::market ptl::features ptl::labels ptl::validation ptl::research ptl::signal ptl::sizing ptl::construction ptl::pipeline ptl::databento ptl::algo ptl::report ptl::optimization
     benchmark::benchmark_main ptl::native_arch)
 
 # Model benchmarks are compiled only when Eigen is available, matching the

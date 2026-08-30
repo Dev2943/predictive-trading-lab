@@ -196,3 +196,14 @@ target_link_libraries(ptl_algo
 add_library(ptl_report report/generator.cpp)
 add_library(ptl::report ALIAS ptl_report)
 target_link_libraries(ptl_report PUBLIC ptl::core ptl::analytics PRIVATE ptl::sanitizers)
+
+add_library(ptl_optimization
+    optimization/covariance.cpp
+    optimization/constraints.cpp
+    optimization/objective.cpp
+    optimization/optimizer.cpp)
+add_library(ptl::optimization ALIAS ptl_optimization)
+# PUBLIC ptl::core only. The optimizer computes weights from forecasts and a
+# risk model; it has no need of the OMS, the broker or the engine, and linking
+# them would create a path by which it could reach the venue.
+target_link_libraries(ptl_optimization PUBLIC ptl::core PRIVATE ptl::sanitizers)

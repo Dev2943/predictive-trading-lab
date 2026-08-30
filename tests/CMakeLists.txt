@@ -29,6 +29,7 @@ add_executable(ptl_tests
     leakage/test_walk_forward.cpp
     unit/test_research.cpp
     unit/test_analytics.cpp
+    unit/test_optimizer.cpp
     unit/test_reporting.cpp
     unit/test_execution_algos.cpp
     unit/test_quote_book.cpp
@@ -37,13 +38,14 @@ add_executable(ptl_tests
     unit/test_sizing_construction.cpp
     leakage/test_pipeline_e2e.cpp
     leakage/test_quote_execution.cpp
-    leakage/test_executor.cpp)
+    leakage/test_executor.cpp
+    leakage/test_optimizer_leakage.cpp)
 # tests/ on the include path so "support/ptl_catch.hpp" resolves. That header
 # carries the Catch2 StringMaker specialisations for ptl vocabulary types --
 # see its comment block for the libc++/libstdc++ divergence it exists to fix.
 target_include_directories(ptl_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(ptl_tests PRIVATE
-    ptl::core ptl::log ptl::config ptl::experiments ptl::market ptl::auth ptl::oms ptl::portfolio ptl::execution ptl::risk ptl::accounting ptl::analytics ptl::engine ptl::features ptl::signal ptl::sizing ptl::construction ptl::pipeline ptl::databento ptl::algo ptl::report ptl::labels ptl::validation ptl::research
+    ptl::core ptl::log ptl::config ptl::experiments ptl::market ptl::auth ptl::oms ptl::portfolio ptl::execution ptl::risk ptl::accounting ptl::analytics ptl::engine ptl::features ptl::signal ptl::sizing ptl::construction ptl::pipeline ptl::databento ptl::algo ptl::report ptl::optimization ptl::labels ptl::validation ptl::research
     Catch2::Catch2WithMain ptl::sanitizers)
 if(PTL_HAVE_EIGEN)
     target_sources(ptl_tests PRIVATE
