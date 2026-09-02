@@ -226,3 +226,22 @@ add_library(ptl::reporting ALIAS ptl_reporting)
 target_link_libraries(ptl_reporting
     PUBLIC ptl::core ptl::analytics ptl::attribution ptl::report
     PRIVATE ptl::sanitizers)
+
+add_library(ptl_strategy strategy/registry.cpp)
+add_library(ptl::strategy ALIAS ptl_strategy)
+# ptl::core ONLY. The catalogue must never know about execution: a registry
+# that could reach the engine would be a registry that could trade.
+target_link_libraries(ptl_strategy PUBLIC ptl::core PRIVATE ptl::sanitizers)
+
+add_library(ptl_storage storage/registry.cpp)
+add_library(ptl::storage ALIAS ptl_storage)
+target_link_libraries(ptl_storage PUBLIC ptl::core PRIVATE ptl::sanitizers)
+
+add_library(ptl_experiment experiment/experiment.cpp)
+add_library(ptl::experiment ALIAS ptl_experiment)
+# Depends on strategy, storage and analytics; NONE of them depends on this.
+# The dependency runs one way only, so the execution engine never learns that
+# experiments exist.
+target_link_libraries(ptl_experiment
+    PUBLIC ptl::core ptl::strategy ptl::storage ptl::analytics ptl::attribution
+    PRIVATE ptl::sanitizers)

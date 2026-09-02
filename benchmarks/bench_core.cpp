@@ -1779,3 +1779,232 @@ void BM_ReportGenerationJson(benchmark::State& state) {
 BENCHMARK(BM_ReportGenerationJson);
 
 }  // namespace
+
+// ---------------------------------------------------------------------------
+// Phase 13: strategy lifecycle and research infrastructure
+// ---------------------------------------------------------------------------
+//
+// These run at experiment definition time, not per event, so microseconds are
+// acceptable. What matters is that a platform holding HUNDREDS of strategies
+// and thousands of experiments still answers a lookup or a leaderboard query
+// quickly enough to be used interactively.
+
+#include "ptl/experiment/experiment.hpp"
+
+namespace {
+
+[[nodiscard]] ptl::strategy::StrategyDescriptor bench_descriptor(std::size_t i) {
+    ptl::strategy::StrategyDescriptor d;
+    auto id = ptl::strategy::StrategyId::create("strategy_" + std::to_string(i));
+    d.id = *id;
+    d.version = ptl::strategy::StrategyVersion{1, static_cast<std::uint32_t>(i % 10), 0};
+    d.state = ptl::strategy::StrategyState::Research;
+    d.metadata.author = "bench";
+    d.metadata.tags = {"intraday", "equities"};
+    d.parameters.push_back({"lookback", "int", "bars", true, "20"});
+    d.parameters.push_back({"threshold", "double", "entry", false, "0.5"});
+    return d;
+}
+
+[[nodiscard]] ptl::storage::DatasetVersion bench_dataset(std::size_t i) {
+    ptl::storage::DatasetVersion d;
+    d.dataset_id = "dataset_" + std::to_string(i);
+    d.version = 1;
+    d.content_checksum = ptl::storage::Checksum::of("content_" + std::to_string(i));
+    d.feature_schema.fields.push_back({"ret_1m", "double", 1});
+    d.normalization_version = "zscore_v1";
+    return d;
+}
+
+void BM_StrategyRegistration(benchmark::State& state) {
+    const auto n = static_cast<std::size_t>(state.range(0));
+    std::vector<ptl::strategy::StrategyDescriptor> descriptors;
+    descriptors.reserve(n);
+    for (std::size_t i = 0; i < n; ++i) descriptors.push_back(bench_descriptor(i));
+
+    for (auto _ : state) {
+        ptl::strategy::StrategyRegistry registry;
+        for (const auto& d : descriptors) {
+            benchmark::DoNotOptimize(registry.register_strategy(d).has_value());
+        }
+    }
+    state.SetItemsProcessed(state.iterations() * state.range(0));
+}
+BENCHMARK(BM_StrategyRegistration)->Arg(100)->Arg(1000);
+
+/// Lookup on a catalogue the size a real platform carries.
+void BM_StrategyLookup(benchmark::State& state) {
+    const auto n = static_cast<std::size_t>(state.range(0));
+    ptl::strategy::StrategyRegistry registry;
+    for (std::size_t i = 0; i < n; ++i) {
+        (void)registry.register_strategy(bench_descriptor(i));
+    }
+    const auto target = bench_descriptor(n / 2);
+
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(registry.find(target.id, target.version));
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_StrategyLookup)->Arg(1000);
+
+void BM_DatasetLookup(benchmark::State& state) {
+    const auto n = static_cast<std::size_t>(state.range(0));
+    ptl::storage::DatasetRegistry registry;
+    for (std::size_t i = 0; i < n; ++i) {
+        (void)registry.register_dataset(bench_dataset(i));
+    }
+    const std::string target = "dataset_" + std::to_string(n / 2);
+
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(registry.contains(target, 1));
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_DatasetLookup)->Arg(1000);
+
+void BM_ModelLookup(benchmark::State& state) {
+    const auto n = static_cast<std::size_t>(state.range(0));
+    ptl::storage::DatasetRegistry datasets;
+    (void)datasets.register_dataset(bench_dataset(0));
+    ptl::storage::ModelRegistry models{datasets};
+
+    for (std::size_t i = 0; i < n; ++i) {
+        ptl::storage::ModelMetadata model;
+        model.model_id = "model_" + std::to_string(i % 20);
+        model.version = static_cast<std::uint32_t>(i / 20 + 1);
+        model.kind = "ridge";
+        model.dataset_id = "dataset_0";
+        model.dataset_version = 1;
+        model.status = ptl::storage::ModelStatus::Trained;
+        (void)models.register_model(model);
+    }
+    (void)models.promote("model_5", 1, ptl::Timestamp{});
+
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(models.champion("model_5"));
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_ModelLookup)->Arg(1000);
+
+/// Config fingerprinting runs on every experiment definition and every resume
+/// check, so it sits on the interactive path.
+void BM_ConfigFingerprint(benchmark::State& state) {
+    ptl::experiment::ExperimentConfig config;
+    config.experiment_id = "bench";
+    config.strategy_id = *ptl::strategy::StrategyId::create("alpha");
+    config.strategy_version = ptl::strategy::StrategyVersion{1, 0, 0};
+    config.dataset_id = "equities";
+    config.dataset_version = 1;
+    config.seed = 42;
+    for (int i = 0; i < 20; ++i) {
+        config.parameters["param_" + std::to_string(i)] = std::to_string(i * 1.5);
+    }
+
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(config.fingerprint());
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_ConfigFingerprint);
+
+void BM_ExperimentCreation(benchmark::State& state) {
+    ptl::strategy::StrategyRegistry strategies;
+    (void)strategies.register_strategy(bench_descriptor(0));
+    ptl::storage::DatasetRegistry datasets;
+    (void)datasets.register_dataset(bench_dataset(0));
+
+    const ptl::experiment::ExperimentRunner runner{strategies, datasets};
+
+    ptl::experiment::ExperimentConfig config;
+    config.experiment_id = "bench";
+    config.strategy_id = *ptl::strategy::StrategyId::create("strategy_0");
+    config.strategy_version = ptl::strategy::StrategyVersion{1, 0, 0};
+    config.dataset_id = "dataset_0";
+    config.dataset_version = 1;
+    config.seed = 42;
+    config.parameters["lookback"] = "30";
+
+    for (auto _ : state) {
+        auto prepared = runner.prepare(config);
+        benchmark::DoNotOptimize(prepared.has_value());
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_ExperimentCreation);
+
+[[nodiscard]] std::vector<ptl::experiment::ExperimentResult> bench_results(std::size_t n) {
+    std::vector<ptl::experiment::ExperimentResult> out;
+    out.reserve(n);
+    for (std::size_t i = 0; i < n; ++i) {
+        ptl::experiment::ExperimentResult r;
+        r.experiment_id = "exp_" + std::to_string(i);
+        r.status = ptl::experiment::ExperimentStatus::Completed;
+        ptl::analytics::PerformanceReport performance;
+        performance.metrics.sharpe = std::sin(static_cast<double>(i) * 0.1) * 2.0;
+        performance.metrics.sortino = performance.metrics.sharpe * 1.2;
+        performance.metrics.calmar = performance.metrics.sharpe * 0.8;
+        performance.max_drawdown = 0.05 + static_cast<double>(i % 20) * 0.01;
+        performance.turnover.annualized_turnover = 5.0 + static_cast<double>(i % 50);
+        r.performance = std::move(performance);
+        out.push_back(std::move(r));
+    }
+    return out;
+}
+
+/// Comparison ranks every experiment on every metric, so it is O(m * n log n).
+void BM_ComparisonGeneration(benchmark::State& state) {
+    const auto results = bench_results(static_cast<std::size_t>(state.range(0)));
+    const ptl::experiment::ExperimentComparison comparison;
+
+    for (auto _ : state) {
+        auto report = comparison.compare(results);
+        benchmark::DoNotOptimize(report.has_value());
+    }
+    state.SetItemsProcessed(state.iterations() * state.range(0));
+}
+BENCHMARK(BM_ComparisonGeneration)->Arg(100)->Arg(1000);
+
+void BM_LeaderboardGeneration(benchmark::State& state) {
+    const auto n = static_cast<std::size_t>(state.range(0));
+    const auto results = bench_results(n);
+
+    std::vector<ptl::experiment::Experiment> experiments;
+    experiments.reserve(n);
+    for (std::size_t i = 0; i < n; ++i) {
+        ptl::experiment::Experiment e;
+        e.config.experiment_id = results[i].experiment_id;
+        e.config.strategy_id = *ptl::strategy::StrategyId::create("alpha");
+        e.status = ptl::experiment::ExperimentStatus::Completed;
+        e.result = results[i];
+        experiments.push_back(std::move(e));
+    }
+
+    for (auto _ : state) {
+        auto board = ptl::experiment::LeaderboardBuilder::build(experiments, "sharpe");
+        benchmark::DoNotOptimize(board.has_value());
+    }
+    state.SetItemsProcessed(state.iterations() * state.range(0));
+}
+BENCHMARK(BM_LeaderboardGeneration)->Arg(100)->Arg(1000);
+
+/// Checkpoint restore: parse plus checksum verification. On the recovery path,
+/// where a slow restore delays every resumed experiment.
+void BM_CheckpointRestore(benchmark::State& state) {
+    ptl::experiment::ExperimentSnapshot snapshot;
+    snapshot.experiment_id = "bench_experiment";
+    snapshot.sequence = 42;
+    snapshot.events_processed = 1'000'000;
+    snapshot.config_fingerprint = 0xDEADBEEFCAFEULL;
+    const std::string json = snapshot.to_json();
+
+    for (auto _ : state) {
+        auto restored = ptl::experiment::ExperimentSnapshot::from_json(json);
+        benchmark::DoNotOptimize(restored.has_value());
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_CheckpointRestore);
+
+}  // namespace
