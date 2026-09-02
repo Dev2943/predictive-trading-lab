@@ -1512,3 +1512,270 @@ void BM_EndToEndOptimization(benchmark::State& state) {
 BENCHMARK(BM_EndToEndOptimization)->Arg(10)->Arg(50);
 
 }  // namespace
+
+// ---------------------------------------------------------------------------
+// Phase 12: attribution, rolling analytics and reporting
+// ---------------------------------------------------------------------------
+//
+// These run once per report, not per event, so milliseconds are acceptable in
+// a way they would not be on the quote path. What matters is SCALING: rolling
+// analytics are incremental and must stay O(n) in the series length rather than
+// O(n*w), and the benchmarks below are sized to show that.
+
+#include "ptl/attribution/pnl.hpp"
+#include "ptl/reporting/reports.hpp"
+
+namespace {
+
+[[nodiscard]] std::vector<ptl::Timestamp> attr_timestamps(std::size_t n) {
+    std::vector<ptl::Timestamp> out;
+    out.reserve(n);
+    ptl::Timestamp t{};
+    (void)ptl::parse_timestamp("2024-01-02T20:00:00Z", t);
+    for (std::size_t i = 0; i < n; ++i) {
+        out.push_back(t);
+        t += std::chrono::hours{24};
+    }
+    return out;
+}
+
+[[nodiscard]] std::vector<double> attr_returns(std::size_t n, double phase = 0.0) {
+    std::vector<double> out;
+    out.reserve(n);
+    for (std::size_t i = 0; i < n; ++i) {
+        out.push_back(std::sin((static_cast<double>(i) + phase) * 0.23) * 0.012 + 0.0002);
+    }
+    return out;
+}
+
+[[nodiscard]] std::vector<ptl::portfolio::EquityPoint> attr_curve(std::size_t n) {
+    std::vector<ptl::portfolio::EquityPoint> out;
+    out.reserve(n);
+    const auto ts = attr_timestamps(n);
+    double equity = 1'000'000.0;
+    double realized = 0.0;
+    for (std::size_t i = 0; i < n; ++i) {
+        equity *= 1.0 + std::sin(static_cast<double>(i) * 0.19) * 0.003;
+        realized += 250.0;
+        ptl::portfolio::EquityPoint p;
+        p.ts = ts[i];
+        p.equity = ptl::Notional{equity};
+        p.cash = ptl::Notional{equity * 0.35};
+        p.realized_pnl = ptl::Notional{realized};
+        p.unrealized_pnl = ptl::Notional{equity * 0.01};
+        p.gross_exposure = ptl::Notional{equity * 0.85};
+        p.net_exposure = ptl::Notional{equity * 0.30};
+        p.turnover = ptl::Notional{static_cast<double>(i + 1) * 20'000.0};
+        out.push_back(p);
+    }
+    return out;
+}
+
+/// Incremental rolling volatility. The scaling claim of the whole module: this
+/// must grow linearly in the series length, not in length times window.
+void BM_RollingVolatility(benchmark::State& state) {
+    const auto n = static_cast<std::size_t>(state.range(0));
+    const auto ts = attr_timestamps(n);
+    const auto returns = attr_returns(n);
+
+    ptl::analytics::RollingConfig cfg;
+    cfg.window = 60;
+    const ptl::analytics::RollingAnalyzer analyzer{cfg};
+
+    for (auto _ : state) {
+        auto series = analyzer.volatility(ts, returns);
+        benchmark::DoNotOptimize(series.has_value());
+    }
+    state.SetItemsProcessed(state.iterations() * state.range(0));
+}
+BENCHMARK(BM_RollingVolatility)->Arg(1000)->Arg(10000);
+
+void BM_RollingSharpe(benchmark::State& state) {
+    const auto n = static_cast<std::size_t>(state.range(0));
+    const auto ts = attr_timestamps(n);
+    const auto returns = attr_returns(n);
+
+    ptl::analytics::RollingConfig cfg;
+    cfg.window = 60;
+    const ptl::analytics::RollingAnalyzer analyzer{cfg};
+
+    for (auto _ : state) {
+        auto series = analyzer.sharpe(ts, returns);
+        benchmark::DoNotOptimize(series.has_value());
+    }
+    state.SetItemsProcessed(state.iterations() * state.range(0));
+}
+BENCHMARK(BM_RollingSharpe)->Arg(10000);
+
+void BM_RollingBetaSeries(benchmark::State& state) {
+    const auto n = static_cast<std::size_t>(state.range(0));
+    const auto ts = attr_timestamps(n);
+    const auto returns = attr_returns(n);
+    const auto benchmark_series = attr_returns(n, 3.0);
+
+    ptl::analytics::RollingConfig cfg;
+    cfg.window = 60;
+    const ptl::analytics::RollingAnalyzer analyzer{cfg};
+
+    for (auto _ : state) {
+        auto series = analyzer.beta(ts, returns, benchmark_series);
+        benchmark::DoNotOptimize(series.has_value());
+    }
+    state.SetItemsProcessed(state.iterations() * state.range(0));
+}
+BENCHMARK(BM_RollingBetaSeries)->Arg(10000);
+
+/// VaR genuinely needs order statistics, so it is O(n log w) rather than O(n).
+/// Benchmarked separately to keep that cost visible rather than averaged into
+/// the incremental statistics.
+void BM_RollingVaR(benchmark::State& state) {
+    const auto n = static_cast<std::size_t>(state.range(0));
+    const auto ts = attr_timestamps(n);
+    const auto returns = attr_returns(n);
+
+    ptl::analytics::RollingConfig cfg;
+    cfg.window = 60;
+    const ptl::analytics::RollingAnalyzer analyzer{cfg};
+
+    for (auto _ : state) {
+        auto series = analyzer.value_at_risk(ts, returns);
+        benchmark::DoNotOptimize(series.has_value());
+    }
+    state.SetItemsProcessed(state.iterations() * state.range(0));
+}
+BENCHMARK(BM_RollingVaR)->Arg(10000);
+
+void BM_PnlAttribution(benchmark::State& state) {
+    const auto n = static_cast<std::size_t>(state.range(0));
+    const auto curve = attr_curve(n);
+
+    ptl::attribution::FinancingRates rates;
+    rates.borrow_rate = 0.04;
+    rates.margin_rate = 0.055;
+    rates.cash_rate = 0.03;
+    rates.opportunity_rate = 0.07;
+    const ptl::attribution::PnlAttributor attributor{rates};
+
+    for (auto _ : state) {
+        auto series = attributor.decompose_series(curve, {});
+        benchmark::DoNotOptimize(series.has_value());
+    }
+    state.SetItemsProcessed(state.iterations() * state.range(0));
+}
+BENCHMARK(BM_PnlAttribution)->Arg(1000)->Arg(10000);
+
+void BM_FactorContribution(benchmark::State& state) {
+    const auto n = static_cast<std::size_t>(state.range(0));
+    const auto portfolio = attr_returns(n);
+    const auto benchmark_series = attr_returns(n, 2.0);
+
+    for (auto _ : state) {
+        auto contribution =
+            ptl::attribution::PnlAttributor::factor_contribution(portfolio, benchmark_series);
+        benchmark::DoNotOptimize(contribution.has_value());
+    }
+    state.SetItemsProcessed(state.iterations() * state.range(0));
+}
+BENCHMARK(BM_FactorContribution)->Arg(10000);
+
+void BM_TradeExecutionAttribution(benchmark::State& state) {
+    const auto n = static_cast<std::size_t>(state.range(0));
+
+    std::vector<ptl::attribution::TradeExecutionQuality> trades;
+    trades.reserve(n);
+    ptl::Timestamp t{};
+    (void)ptl::parse_timestamp("2024-01-02T15:00:00Z", t);
+    for (std::size_t i = 0; i < n; ++i) {
+        ptl::attribution::TradeExecutionQuality trade;
+        trade.instrument = static_cast<ptl::InstrumentId>(i % 9);
+        trade.side = i % 2 == 0 ? ptl::Side::Buy : ptl::Side::Sell;
+        trade.quantity = ptl::Qty{100.0 + static_cast<double>(i % 50)};
+        trade.implementation_shortfall = ptl::Bps{static_cast<double>(i % 20) - 5.0};
+        trade.delay_cost = ptl::Bps{static_cast<double>(i % 7)};
+        trade.execution_cost = ptl::Bps{static_cast<double>(i % 11) - 3.0};
+        trade.realized_edge = ptl::Bps{static_cast<double>(i % 30)};
+        trade.decision_time = t;
+        trade.first_fill_time = t + std::chrono::seconds{static_cast<long>(i % 600)};
+        trade.holding_period = std::chrono::minutes{static_cast<long>(i % 90)};
+        trade.fill_count = 1 + i % 4;
+        trades.push_back(trade);
+        t += std::chrono::minutes{1};
+    }
+
+    const ptl::attribution::ExecutionQualityAnalyzer analyzer;
+    for (auto _ : state) {
+        auto summary = analyzer.summarize(trades);
+        benchmark::DoNotOptimize(summary.has_value());
+    }
+    state.SetItemsProcessed(state.iterations() * state.range(0));
+}
+BENCHMARK(BM_TradeExecutionAttribution)->Arg(1000)->Arg(10000);
+
+void BM_SignalDecay(benchmark::State& state) {
+    const auto n = static_cast<std::size_t>(state.range(0));
+    std::vector<ptl::attribution::TradeExecutionQuality> trades;
+    trades.reserve(n);
+    ptl::Timestamp t{};
+    (void)ptl::parse_timestamp("2024-01-02T15:00:00Z", t);
+    for (std::size_t i = 0; i < n; ++i) {
+        ptl::attribution::TradeExecutionQuality trade;
+        trade.decision_time = t;
+        trade.first_fill_time = t + std::chrono::seconds{static_cast<long>(i % 1200)};
+        trade.realized_edge = ptl::Bps{static_cast<double>(i % 40)};
+        trade.quantity = ptl::Qty{100.0};
+        trades.push_back(trade);
+    }
+    const std::vector<ptl::Duration> horizons{std::chrono::seconds{30}, std::chrono::minutes{5},
+                                              std::chrono::minutes{20}};
+
+    const ptl::attribution::ExecutionQualityAnalyzer analyzer;
+    for (auto _ : state) {
+        auto profile = analyzer.signal_decay(trades, horizons);
+        benchmark::DoNotOptimize(profile.has_value());
+    }
+    state.SetItemsProcessed(state.iterations() * state.range(0));
+}
+BENCHMARK(BM_SignalDecay)->Arg(10000);
+
+/// Report assembly plus JSON serialization: what a scheduled report pays.
+void BM_ReportGenerationJson(benchmark::State& state) {
+    ptl::analytics::PerformanceReport performance;
+    performance.run_id = "bench";
+    performance.strategy_name = "bench_strategy";
+    (void)ptl::parse_timestamp("2024-01-02T20:00:00Z", performance.period_begin);
+    (void)ptl::parse_timestamp("2025-01-02T20:00:00Z", performance.period_end);
+    performance.initial_equity = ptl::Notional{1'000'000.0};
+    performance.final_equity = ptl::Notional{1'180'000.0};
+
+    const auto ts = attr_timestamps(500);
+    double equity = 1'000'000.0;
+    for (std::size_t i = 0; i < ts.size(); ++i) {
+        ptl::analytics::PerformanceSnapshot snap;
+        snap.ts = ts[i];
+        equity *= 1.0003;
+        snap.equity = ptl::Notional{equity};
+        snap.period_return = 0.0003;
+        snap.drawdown = static_cast<double>(i % 11) * 0.002;
+        snap.exposure.gross_leverage = 0.9;
+        snap.exposure.net_leverage = 0.35;
+        performance.daily_snapshots.push_back(snap);
+        if (i % 21 == 0) performance.monthly_snapshots.push_back(snap);
+    }
+
+    ptl::reporting::ReportConfig cfg;
+    cfg.max_series_points = 500;
+    const ptl::reporting::ReportBuilder builder{cfg};
+
+    for (auto _ : state) {
+        auto report = builder.build(ptl::reporting::ReportKind::Daily, performance);
+        if (!report) continue;
+        auto viz = builder.build_visualization(performance, {});
+        if (viz) report->visualization = std::move(*viz);
+        auto json = builder.to_json(*report);
+        benchmark::DoNotOptimize(json.has_value());
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_ReportGenerationJson);
+
+}  // namespace

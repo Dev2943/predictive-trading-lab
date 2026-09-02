@@ -88,7 +88,8 @@ add_library(ptl_analytics
     analytics/exposure.cpp
     analytics/risk.cpp
     analytics/attribution.cpp
-    analytics/report.cpp)
+    analytics/report.cpp
+    analytics/rolling.cpp)
 add_library(ptl::analytics ALIAS ptl_analytics)
 target_link_libraries(ptl_analytics PUBLIC ptl::core ptl::portfolio ptl::accounting PRIVATE ptl::sanitizers)
 
@@ -207,3 +208,21 @@ add_library(ptl::optimization ALIAS ptl_optimization)
 # risk model; it has no need of the OMS, the broker or the engine, and linking
 # them would create a path by which it could reach the venue.
 target_link_libraries(ptl_optimization PUBLIC ptl::core PRIVATE ptl::sanitizers)
+
+add_library(ptl_attribution
+    attribution/pnl.cpp
+    attribution/execution_quality.cpp)
+add_library(ptl::attribution ALIAS ptl_attribution)
+# Read-only observer: it consumes completed history and holds no handle to the
+# OMS, broker or engine, so it cannot trade, size, optimize or execute.
+target_link_libraries(ptl_attribution
+    PUBLIC ptl::core ptl::portfolio ptl::oms ptl::accounting ptl::analytics
+    PRIVATE ptl::sanitizers)
+
+add_library(ptl_reporting reporting/reports.cpp)
+add_library(ptl::reporting ALIAS ptl_reporting)
+# Composes with ptl::report rather than duplicating it: json_escape is reused,
+# not reimplemented. Two escaping implementations is how one ends up wrong.
+target_link_libraries(ptl_reporting
+    PUBLIC ptl::core ptl::analytics ptl::attribution ptl::report
+    PRIVATE ptl::sanitizers)
