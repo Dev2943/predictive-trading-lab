@@ -65,7 +65,27 @@ public:
            risk::RiskManager& risk, accounting::Journal& journal,
            const market::Calendar* calendar = nullptr, EngineConfig cfg = {});
 
+    /// Run to completion. The Phase 3 entry point, behaviour unchanged.
     [[nodiscard]] Result<RunSummary> run();
+
+    /// Stepped execution: begin() -> step()* -> finish().
+    ///
+    /// WHY THIS EXISTS. A paper session runs continuously and must do work
+    /// BETWEEN events -- persist state, honour a pause, roll the trading day,
+    /// answer a stop request. run() is all-or-nothing and cannot express that.
+    ///
+    /// The only alternative would be a second dispatch loop inside the session,
+    /// duplicating the strategy dispatch, risk gating and fill routing this
+    /// class already owns. That is the precise failure the one-loop rule exists
+    /// to prevent, and it is worse than widening this interface.
+    ///
+    /// run() is implemented in terms of these, so there is still exactly ONE
+    /// dispatch loop; the caller merely owns its cadence. Determinism is
+    /// unaffected: step() is a bounded run(), and neither the events consumed
+    /// nor their order depends on the chunk size.
+    [[nodiscard]] Result<bool> begin();
+    [[nodiscard]] Result<std::size_t> step(std::size_t max_events);
+    [[nodiscard]] Result<RunSummary> finish();
 
     [[nodiscard]] const RunSummary& summary() const noexcept { return summary_; }
 
@@ -87,6 +107,8 @@ private:
     const market::Calendar* calendar_;
     EngineConfig cfg_;
     RunSummary summary_;
+    /// Guards step() against being called before begin().
+    bool started_ = false;
 
     // Per-instrument market state, kept between events so the venue always has
     // the most recent tradable prices. std::map for deterministic iteration.

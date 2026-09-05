@@ -2008,3 +2008,167 @@ void BM_CheckpointRestore(benchmark::State& state) {
 BENCHMARK(BM_CheckpointRestore);
 
 }  // namespace
+
+// ---------------------------------------------------------------------------
+// Phase 14: paper trading
+// ---------------------------------------------------------------------------
+//
+// Order screening and routing sit on the per-event path of a running session.
+// Persistence and recovery run on a cadence, so milliseconds are acceptable
+// there in a way they are not on the routing path.
+
+#include "ptl/paper/session.hpp"
+
+namespace {
+
+[[nodiscard]] ptl::Timestamp paper_t0() {
+    ptl::Timestamp t{};
+    (void)ptl::parse_timestamp("2024-07-02T15:00:00Z", t);
+    return t;
+}
+
+/// Screening plus handoff to the simulator: what every order pays.
+void BM_PaperOrderRouting(benchmark::State& state) {
+    ptl::SimulatedClock clock{paper_t0()};
+    ptl::execution::StandardCostModel costs;
+    ptl::execution::StandardLatencyModel latency;
+    ptl::execution::BrokerSimulator simulator{clock, costs, latency, ptl::DeterministicRng{1}};
+    ptl::portfolio::Portfolio portfolio;
+    const ptl::paper::PaperAccount account{portfolio};
+
+    ptl::paper::PaperBrokerConfig config;
+    config.enforce_buying_power = false;
+    ptl::paper::PaperBroker broker{clock, simulator, account, config};
+    (void)broker.connect();
+
+    std::uint64_t next = 0;
+    for (auto _ : state) {
+        ptl::LifecycleTimes times;
+        times.decision_time = clock.now();
+        auto order =
+            ptl::oms::Order::market(static_cast<ptl::oms::OrderId>(++next), ptl::InstrumentId{0},
+                                    ptl::Side::Buy, ptl::Qty{10}, times);
+        auto ack = broker.submit(order->with_arrival_price(ptl::Price{500.0}));
+        benchmark::DoNotOptimize(ack.has_value());
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_PaperOrderRouting);
+
+/// Screening with the margin model engaged: the production path.
+void BM_PaperOrderScreening(benchmark::State& state) {
+    ptl::portfolio::Portfolio portfolio;
+    const ptl::paper::PaperAccount account{portfolio};
+    for (auto _ : state) {
+        auto ok = account.can_accept(ptl::Notional{5000.0}, ptl::Side::Buy, false);
+        benchmark::DoNotOptimize(ok.has_value());
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_PaperOrderScreening);
+
+/// The portfolio read plus the margin computation, taken on every persist.
+void BM_PaperAccountSnapshot(benchmark::State& state) {
+    ptl::portfolio::Portfolio portfolio;
+    const ptl::paper::PaperAccount account{portfolio};
+    const ptl::Timestamp now = paper_t0();
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(account.snapshot(now).equity.get());
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_PaperAccountSnapshot);
+
+/// Fill routing through the adapter queue.
+void BM_PaperFillRouting(benchmark::State& state) {
+    ptl::SimulatedClock clock{paper_t0()};
+    ptl::execution::CostConfig cost_config;
+    cost_config.commission_per_share = 0.0;
+    cost_config.minimum_commission = 0.0;
+    cost_config.stochastic_slippage_bps = ptl::Bps{0.0};
+    cost_config.impact_coefficient = 0.0;
+    ptl::execution::StandardCostModel costs{cost_config};
+    ptl::execution::StandardLatencyModel latency;
+    ptl::execution::FillConfig fill_config;
+    fill_config.respect_displayed_size = false;
+    fill_config.max_participation_rate = 1.0;
+    ptl::execution::BrokerSimulator simulator{clock, costs, latency, ptl::DeterministicRng{1},
+                                              fill_config};
+    ptl::portfolio::Portfolio portfolio;
+    const ptl::paper::PaperAccount account{portfolio};
+
+    ptl::paper::PaperBrokerConfig config;
+    config.enforce_buying_power = false;
+    ptl::paper::PaperBroker broker{clock, simulator, account, config};
+    (void)broker.connect();
+
+    std::uint64_t next = 0;
+    for (auto _ : state) {
+        state.PauseTiming();
+        ptl::LifecycleTimes times;
+        times.decision_time = clock.now();
+        auto order =
+            ptl::oms::Order::market(static_cast<ptl::oms::OrderId>(++next), ptl::InstrumentId{0},
+                                    ptl::Side::Buy, ptl::Qty{10}, times);
+        (void)broker.submit(order->with_arrival_price(ptl::Price{500.0}));
+        ptl::execution::MarketState market;
+        market.bid = ptl::Price{500.0};
+        market.ask = ptl::Price{500.0};
+        market.bid_size = ptl::Qty{1e6};
+        market.ask_size = ptl::Qty{1e6};
+        market.interval_volume = ptl::Volume{1e9};
+        market.has_quote = true;
+        clock.advance_by(std::chrono::seconds{1});
+        auto fills = simulator.on_market(ptl::InstrumentId{0}, market, clock.now());
+        state.ResumeTiming();
+
+        if (fills) broker.route(*fills);
+        benchmark::DoNotOptimize(broker.poll_fills().size());
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_PaperFillRouting);
+
+[[nodiscard]] ptl::paper::SessionState bench_state(std::size_t n) {
+    ptl::paper::SessionState state;
+    state.session_id = "bench";
+    state.sequence = 42;
+    state.config_fingerprint = 0xDEADBEEF;
+    state.events_processed = 1'000'000;
+    state.account.cash = ptl::Notional{123'456.789012};
+    state.account.equity = ptl::Notional{234'567.890123};
+    for (std::size_t i = 0; i < n; ++i) {
+        state.positions.push_back({static_cast<std::uint32_t>(i),
+                                   100.0 + static_cast<double>(i) * 0.123456,
+                                   499.0 + static_cast<double>(i) * 0.654321, 0.0});
+        state.working_orders.push_back({static_cast<std::uint64_t>(i),
+                                        static_cast<std::uint32_t>(i % 9), 0,
+                                        50.0 + static_cast<double>(i), 0.0});
+    }
+    return state;
+}
+
+/// Serialization, on the persistence cadence.
+void BM_PaperPersistence(benchmark::State& state) {
+    const auto snapshot = bench_state(static_cast<std::size_t>(state.range(0)));
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(snapshot.to_json().size());
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_PaperPersistence)->Arg(10)->Arg(100);
+
+/// Recovery: parse plus checksum verification. On the restart path, where a
+/// slow restore delays every session coming back up.
+void BM_PaperSessionRecovery(benchmark::State& state) {
+    const auto snapshot = bench_state(static_cast<std::size_t>(state.range(0)));
+    const std::string json = snapshot.to_json();
+    for (auto _ : state) {
+        auto restored = ptl::paper::SessionState::from_json(json);
+        benchmark::DoNotOptimize(restored.has_value());
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_PaperSessionRecovery)->Arg(10)->Arg(100);
+
+}  // namespace

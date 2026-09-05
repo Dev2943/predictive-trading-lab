@@ -245,3 +245,16 @@ add_library(ptl::experiment ALIAS ptl_experiment)
 target_link_libraries(ptl_experiment
     PUBLIC ptl::core ptl::strategy ptl::storage ptl::analytics ptl::attribution
     PRIVATE ptl::sanitizers)
+
+add_library(ptl_paper
+    paper/account.cpp
+    paper/broker.cpp
+    paper/session.cpp)
+add_library(ptl::paper ALIAS ptl_paper)
+# Paper trading is ANOTHER BROKER, not another trading system. It links the
+# existing engine, execution, risk, OMS and portfolio rather than reimplementing
+# any of them.
+target_link_libraries(ptl_paper
+    PUBLIC ptl::core ptl::engine ptl::execution ptl::portfolio ptl::oms
+           ptl::market ptl::storage
+    PRIVATE ptl::sanitizers)

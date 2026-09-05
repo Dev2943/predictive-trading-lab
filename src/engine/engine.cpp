@@ -181,17 +181,30 @@ Result<bool> Engine::handle_quote(const market::Quote& q, Sink& sink) {
     return true;
 }
 
-Result<RunSummary> Engine::run() {
+Result<bool> Engine::begin() {
+    // Lifted verbatim out of run(), so a stepped run and a batch run enter the
+    // loop in identical state. See the header for why the split exists.
     reset_chain_violation_count();
     summary_ = RunSummary{};
     peak_equity_ = pf_->equity();
+    started_ = true;
 
     StrategyContext start_ctx{*clock_, *pf_, *oms_, risk_->limits(), calendar_};
     if (auto s = strategy_->on_start(start_ctx); !s) return fail(s.error());
+    return true;
+}
 
+Result<std::size_t> Engine::step(std::size_t max_events) {
+    if (!started_) {
+        return fail(make_error(ErrorCode::ValidationFailed, "Engine::step called before begin()"));
+    }
     Sink sink{*this};
+    std::size_t processed = 0;
 
-    while (auto event = source_->next()) {
+    while (processed < max_events) {
+        auto event = source_->next();
+        if (!event.has_value()) break;
+        ++processed;
         ++summary_.events_processed;
         const Timestamp ts = market::exchange_time_of(*event);
         if (!is_set(summary_.first_event)) summary_.first_event = ts;
@@ -235,7 +248,10 @@ Result<RunSummary> Engine::run() {
         const Notional eq = pf_->equity();
         if (eq.get() > peak_equity_.get()) peak_equity_ = eq;
     }
+    return processed;
+}
 
+Result<RunSummary> Engine::finish() {
     StrategyContext stop_ctx{*clock_, *pf_, *oms_, risk_->limits(), calendar_};
     strategy_->on_stop(stop_ctx);
 
@@ -246,6 +262,19 @@ Result<RunSummary> Engine::run() {
     summary_.chain_violations = chain_violation_count();
     summary_.reconciled = recon.balances() && pf_->identity_holds();
     return summary_;
+}
+
+Result<RunSummary> Engine::run() {
+    // Behaviour unchanged for every caller from Phases 3-13: begin, drain to
+    // exhaustion, finish. The batch path is expressed in terms of the stepped
+    // one, so there is exactly ONE dispatch loop in the system.
+    if (auto b = begin(); !b) return fail(b.error());
+    for (;;) {
+        auto processed = step(1024);
+        if (!processed) return fail(processed.error());
+        if (*processed == 0) break;
+    }
+    return finish();
 }
 
 }  // namespace ptl::engine
