@@ -91,6 +91,66 @@ Result<oms::Fill> BrokerSimulator::make_fill(const oms::Order& order, Price pric
     return f;
 }
 
+Result<oms::Fill> BrokerSimulator::ingest_external_fill(const ExternalFillReport& report) {
+    // VALIDATED, not trusted. A venue message is untrusted input, and a fill
+    // admitted without checking would corrupt the portfolio in a way the
+    // journal reconciliation would flag only much later.
+    const auto it =
+        std::find_if(pending_.begin(), pending_.end(), [&report](const PendingOrder& candidate) {
+            return candidate.order.id() == report.order_id;
+        });
+    if (it == pending_.end()) {
+        return fail(bad("external fill references an order this broker is not working: " +
+                        std::to_string(oms::value_of(report.order_id))));
+    }
+    const auto& order = it->order;
+
+    if (!(report.quantity.get() > 0.0) || !is_finite(report.quantity.get())) {
+        return fail(bad("external fill quantity is not positive"));
+    }
+    if (!(report.price.get() > 0.0) || !is_finite(report.price.get())) {
+        return fail(bad("external fill price is not positive"));
+    }
+    const double remaining = order.quantity().get() - it->filled.get();
+    if (report.quantity.get() > remaining + 1e-9) {
+        // Over-filling would create shares the order never asked for.
+        return fail(bad("external fill of " + std::to_string(report.quantity.get()) +
+                        " exceeds the " + std::to_string(remaining) + " remaining on the order"));
+    }
+
+    oms::Fill f;
+    f.order_id_ = order.id();
+    f.parent_id_ = order.parent_id();
+    f.instrument_ = order.instrument();
+    f.side_ = order.side();
+    f.price_ = report.price;
+    f.quantity_ = report.quantity;
+    // Costs come from the VENUE, not the cost model. The model estimates what a
+    // fill would cost; the venue reports what it did cost, and a live P&L must
+    // use the latter.
+    f.commission_ = report.commission;
+    f.exchange_fee_ = report.exchange_fee;
+    f.liquidity_ = report.liquidity;
+    f.times_ = order.times();
+    f.times_.fill_time = report.fill_time;
+    f.arrival_price_ = order.arrival_price().get() > 0.0 ? order.arrival_price() : report.price;
+
+    // The seven-stage chain is enforced identically for live and simulated
+    // fills. A venue clock that disagrees with ours must not silently produce a
+    // fill that precedes its own decision.
+    if (const auto v = validate_chain(f.times_); v.has_value()) {
+        return fail(bad("external fill would violate the timestamp chain: " + v->describe()));
+    }
+
+    it->filled = Qty{it->filled.get() + report.quantity.get()};
+    if (it->filled.get() >= order.quantity().get() - 1e-9) {
+        pending_.erase(it);
+    }
+    stats_.total_commission = stats_.total_commission + f.commission_;
+    ++stats_.fills;
+    return f;
+}
+
 Result<std::vector<oms::Fill>> BrokerSimulator::on_market(InstrumentId instrument,
                                                           const MarketState& state, Timestamp now) {
     std::vector<oms::Fill> fills;

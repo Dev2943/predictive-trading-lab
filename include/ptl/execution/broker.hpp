@@ -60,6 +60,26 @@ struct ExecutionStats {
     Notional total_impact_cost{};
 };
 
+/// A fill as reported by an external venue.
+///
+/// Deliberately NOT a Fill: it is untrusted input until validated. Keeping the
+/// two types distinct is what stops a broker message being mistaken for a
+/// confirmed fill anywhere in the codebase.
+struct ExternalFillReport {
+    oms::OrderId order_id{oms::kNoOrder};
+    Qty quantity{};
+    Price price{};
+    Timestamp fill_time{kNoTimestamp};
+    Notional commission{};
+    Notional exchange_fee{};
+    /// Taker by default: a live fill whose liquidity flag the venue did not
+    /// report is assumed to have crossed the spread, which is the conservative
+    /// assumption for cost attribution.
+    oms::Liquidity liquidity{oms::Liquidity::Taker};
+    /// The venue's own identifier, for duplicate suppression upstream.
+    std::string venue_fill_id;
+};
+
 class BrokerSimulator {
 public:
     /// \param clock borrowed; the venue reads simulated time from it.
@@ -88,6 +108,31 @@ public:
     [[nodiscard]] Result<std::vector<oms::Fill>> on_quote_update(InstrumentId instrument,
                                                                  const RoutedMarket& routed,
                                                                  Timestamp now);
+
+    /// Record a fill that happened at a REAL VENUE.
+    ///
+    /// WHY THIS EXISTS (Phase 15). Fill's constructor is private and this class
+    /// is its sole friend, so that every dollar in the system traces to one
+    /// origin. A live broker reports fills that this class did not simulate,
+    /// and there are only three ways to admit them:
+    ///
+    ///   1. Widen Fill's friend list to the live adapter. That gives two
+    ///      classes the power to mint money and the invariant is gone.
+    ///   2. Synthesise a MarketState that makes the simulator produce a
+    ///      matching fill. That RE-DERIVES the fill instead of recording it,
+    ///      and can disagree with the quantity the venue actually reported.
+    ///   3. This: a validated ingress on the one class already trusted to
+    ///      construct a Fill.
+    ///
+    /// The invariant is preserved exactly as written -- BrokerSimulator remains
+    /// the only constructor of a Fill. What is new is that it can be TOLD about
+    /// a fill rather than only computing one, and the report is validated
+    /// against the order it claims to fill before it is believed.
+    ///
+    /// \param report what the venue said happened.
+    /// \returns the constructed Fill, or an error if the report is not
+    ///          consistent with a known working order.
+    [[nodiscard]] Result<oms::Fill> ingest_external_fill(const ExternalFillReport& report);
 
     [[nodiscard]] const ExecutionStats& stats() const noexcept { return stats_; }
     [[nodiscard]] std::size_t pending_count() const noexcept { return pending_.size(); }

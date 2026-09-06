@@ -258,3 +258,17 @@ target_link_libraries(ptl_paper
     PUBLIC ptl::core ptl::engine ptl::execution ptl::portfolio ptl::oms
            ptl::market ptl::storage
     PRIVATE ptl::sanitizers)
+
+add_library(ptl_live
+    live/connection.cpp
+    live/translator.cpp
+    live/broker.cpp
+    live/session.cpp)
+add_library(ptl::live ALIAS ptl_live)
+# Live trading is ANOTHER BROKER, exactly as paper is. It links the existing
+# engine, execution, risk, OMS and portfolio rather than reimplementing any of
+# them, and no broker-specific code exists outside the adapter.
+target_link_libraries(ptl_live
+    PUBLIC ptl::core ptl::engine ptl::execution ptl::portfolio ptl::oms
+           ptl::market ptl::storage ptl::paper
+    PRIVATE ptl::sanitizers)

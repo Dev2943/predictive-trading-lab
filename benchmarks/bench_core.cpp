@@ -2172,3 +2172,201 @@ void BM_PaperSessionRecovery(benchmark::State& state) {
 BENCHMARK(BM_PaperSessionRecovery)->Arg(10)->Arg(100);
 
 }  // namespace
+
+// ---------------------------------------------------------------------------
+// Phase 15: live broker integration
+// ---------------------------------------------------------------------------
+//
+// Order translation and message handling sit on the per-event path of a live
+// session. Reconciliation and recovery run on a cadence, so microseconds are
+// acceptable there in a way they are not on the routing path.
+
+#include "ptl/live/session.hpp"
+
+namespace {
+
+[[nodiscard]] ptl::Timestamp live_t0() {
+    ptl::Timestamp t{};
+    (void)ptl::parse_timestamp("2024-07-02T15:00:00Z", t);
+    return t;
+}
+
+/// A transport that accepts everything and returns a scripted inbound batch.
+class BenchTransport final : public ptl::live::ILiveTransport {
+public:
+    [[nodiscard]] std::string_view venue() const noexcept override { return "bench"; }
+    [[nodiscard]] ptl::Result<bool> open() override {
+        open_ = true;
+        return true;
+    }
+    void close() noexcept override { open_ = false; }
+    [[nodiscard]] bool is_open() const noexcept override { return open_; }
+    [[nodiscard]] ptl::Result<bool> send(std::string_view) override { return true; }
+    [[nodiscard]] std::vector<ptl::live::BrokerMessage> poll() override { return inbound; }
+    std::vector<ptl::live::BrokerMessage> inbound;
+
+private:
+    bool open_ = false;
+};
+
+[[nodiscard]] ptl::oms::Order bench_order(std::uint64_t id) {
+    ptl::LifecycleTimes times;
+    times.decision_time = live_t0();
+    auto order =
+        ptl::oms::Order::limit(static_cast<ptl::oms::OrderId>(id), ptl::InstrumentId{0},
+                               ptl::Side::Buy, ptl::Qty{100}, ptl::Price{499.123456789}, times);
+    return order->with_arrival_price(ptl::Price{499.123456789});
+}
+
+/// Encoding an order for the wire: every order pays this.
+void BM_LiveOrderTranslation(benchmark::State& state) {
+    ptl::InstrumentTable table;
+    (void)table.intern("SPY");
+    const ptl::live::AlpacaOrderTranslator translator{ptl::live::AlpacaOrderTranslator::Config{},
+                                                      &table};
+    const auto order = bench_order(1);
+
+    for (auto _ : state) {
+        auto encoded = translator.encode_new(order);
+        benchmark::DoNotOptimize(encoded.has_value());
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_LiveOrderTranslation);
+
+/// Full submit path: screening, translation, simulator registration, send.
+void BM_LiveOrderRouting(benchmark::State& state) {
+    ptl::SimulatedClock clock{live_t0()};
+    BenchTransport transport;
+    ptl::InstrumentTable table;
+    (void)table.intern("SPY");
+    ptl::live::LiveConnection connection{clock, transport};
+    (void)connection.connect();
+    (void)connection.mark_synchronized();
+
+    const ptl::live::AlpacaOrderTranslator translator{ptl::live::AlpacaOrderTranslator::Config{},
+                                                      &table};
+    ptl::execution::StandardCostModel costs;
+    ptl::execution::StandardLatencyModel latency;
+    ptl::execution::BrokerSimulator simulator{clock, costs, latency, ptl::DeterministicRng{1}};
+    ptl::portfolio::Portfolio portfolio;
+    ptl::live::LiveBroker broker{clock, connection, translator, simulator, portfolio};
+
+    std::uint64_t next = 0;
+    for (auto _ : state) {
+        auto submitted = broker.submit(bench_order(++next));
+        benchmark::DoNotOptimize(submitted.has_value());
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_LiveOrderRouting);
+
+/// Heartbeat evaluation, run every loop iteration.
+void BM_LiveHeartbeatProcessing(benchmark::State& state) {
+    ptl::live::HeartbeatMonitor monitor;
+    const ptl::Timestamp t0 = live_t0();
+    monitor.record_heartbeat(t0);
+
+    ptl::Timestamp now = t0;
+    for (auto _ : state) {
+        now += std::chrono::milliseconds{1};
+        monitor.record_activity(now);
+        benchmark::DoNotOptimize(monitor.healthy(now));
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_LiveHeartbeatProcessing);
+
+/// Message hygiene: sequence and duplicate filtering on a batch.
+void BM_LiveMessageHygiene(benchmark::State& state) {
+    const auto n = static_cast<std::size_t>(state.range(0));
+    ptl::SimulatedClock clock{live_t0()};
+    BenchTransport transport;
+    ptl::live::LiveConnection connection{clock, transport};
+    (void)connection.connect();
+
+    transport.inbound.reserve(n);
+    for (std::size_t i = 0; i < n; ++i) {
+        ptl::live::BrokerMessage message;
+        message.kind = ptl::live::MessageKind::Quote;
+        message.sequence = i + 1;
+        message.venue_time = clock.now();
+        transport.inbound.push_back(message);
+    }
+
+    for (auto _ : state) {
+        state.PauseTiming();
+        connection.restore_sequence(0);
+        state.ResumeTiming();
+        benchmark::DoNotOptimize(connection.poll().size());
+    }
+    state.SetItemsProcessed(state.iterations() * state.range(0));
+}
+BENCHMARK(BM_LiveMessageHygiene)->Arg(100)->Arg(1000);
+
+/// Reconnect policy evaluation. Pure arithmetic, but it runs on every
+/// iteration of a recovering session.
+void BM_LiveConnectionRecovery(benchmark::State& state) {
+    ptl::live::SupervisorConfig config;
+    config.max_attempts = 0;
+    ptl::live::ConnectionSupervisor supervisor{config};
+    ptl::Timestamp now = live_t0();
+
+    for (auto _ : state) {
+        now += std::chrono::seconds{1};
+        supervisor.record_attempt(now);
+        benchmark::DoNotOptimize(supervisor.should_attempt(now));
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_LiveConnectionRecovery);
+
+/// Account synchronization: comparing our book against the venue's.
+void BM_LiveAccountSync(benchmark::State& state) {
+    const auto n = static_cast<std::size_t>(state.range(0));
+    ptl::SimulatedClock clock{live_t0()};
+    BenchTransport transport;
+    ptl::live::LiveConnection connection{clock, transport};
+    const ptl::live::AlpacaOrderTranslator translator{};
+    ptl::execution::StandardCostModel costs;
+    ptl::execution::StandardLatencyModel latency;
+    ptl::execution::BrokerSimulator simulator{clock, costs, latency, ptl::DeterministicRng{1}};
+    ptl::portfolio::Portfolio portfolio;
+    ptl::live::LiveBroker broker{clock, connection, translator, simulator, portfolio};
+
+    ptl::live::BrokerAccountSnapshot venue;
+    venue.ts = clock.now();
+    venue.cash = portfolio.cash();
+    for (std::size_t i = 0; i < n; ++i) {
+        venue.positions[static_cast<std::uint32_t>(i)] = static_cast<double>(i);
+    }
+
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(broker.reconcile(venue).clean());
+    }
+    state.SetItemsProcessed(state.iterations() * state.range(0));
+}
+BENCHMARK(BM_LiveAccountSync)->Arg(10)->Arg(100);
+
+/// Live state serialization and checksum-verified restore.
+void BM_LiveSessionRecovery(benchmark::State& state) {
+    ptl::live::LiveSessionState snapshot;
+    snapshot.session_id = "bench";
+    snapshot.sequence = 42;
+    snapshot.events_processed = 1'000'000;
+    snapshot.last_venue_sequence = 987654;
+    snapshot.account.cash = ptl::Notional{123'456.789012};
+    for (std::size_t i = 0; i < 50; ++i) {
+        snapshot.tracked_orders.emplace_back("ptl-" + std::to_string(i), i);
+    }
+    const std::string json = snapshot.to_json();
+
+    for (auto _ : state) {
+        auto restored = ptl::live::LiveSessionState::from_json(json);
+        benchmark::DoNotOptimize(restored.has_value());
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_LiveSessionRecovery);
+
+}  // namespace
