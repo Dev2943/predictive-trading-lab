@@ -272,3 +272,14 @@ target_link_libraries(ptl_live
     PUBLIC ptl::core ptl::engine ptl::execution ptl::portfolio ptl::oms
            ptl::market ptl::storage ptl::paper
     PRIVATE ptl::sanitizers)
+
+add_library(ptl_ops
+    ops/metrics.cpp
+    ops/health.cpp
+    ops/diagnostics.cpp)
+add_library(ptl::ops ALIAS ptl_ops)
+# OBSERVE-ONLY. Ops depends on the trading modules to read them; none of them
+# depends on ops, so observability cannot change trading behaviour.
+target_link_libraries(ptl_ops
+    PUBLIC ptl::core ptl::config ptl::portfolio ptl::oms ptl::risk ptl::log
+    PRIVATE ptl::sanitizers)

@@ -2370,3 +2370,227 @@ void BM_LiveSessionRecovery(benchmark::State& state) {
 BENCHMARK(BM_LiveSessionRecovery);
 
 }  // namespace
+
+// ---------------------------------------------------------------------------
+// Phase 16: production operations
+// ---------------------------------------------------------------------------
+//
+// Metrics and logging sit on the per-event path: a counter increment happens
+// for every order and every fill, so its cost is multiplied by throughput.
+// Health checks, alerts and diagnostics run on a cadence and may cost more.
+
+#include "ptl/log/logger.hpp"
+#include "ptl/ops/diagnostics.hpp"
+
+namespace {
+
+[[nodiscard]] ptl::Timestamp ops_t0() {
+    ptl::Timestamp t{};
+    (void)ptl::parse_timestamp("2024-07-02T15:00:00Z", t);
+    return t;
+}
+
+/// A resource reader with no operating system behind it, so the benchmark
+/// measures our code rather than /proc.
+class BenchResourceReader final : public ptl::ops::IResourceReader {
+public:
+    [[nodiscard]] ptl::Result<ptl::ops::ResourceSample> read() override {
+        ptl::ops::ResourceSample sample;
+        sample.available = true;
+        sample.resident_bytes = 128ULL * 1024 * 1024;
+        cpu_ += 0.01;
+        sample.cpu_seconds = cpu_;
+        sample.open_file_descriptors = 24;
+        return sample;
+    }
+
+private:
+    double cpu_ = 0.0;
+};
+
+/// The hottest ops operation: one counter increment per order.
+void BM_MetricsIncrement(benchmark::State& state) {
+    ptl::ops::MetricsRegistry registry;
+    for (auto _ : state) {
+        registry.increment(ptl::ops::metric_names::kOrdersSubmitted);
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_MetricsIncrement);
+
+void BM_MetricsGauge(benchmark::State& state) {
+    ptl::ops::MetricsRegistry registry;
+    double value = 0.0;
+    for (auto _ : state) {
+        value += 1.0;
+        registry.set_gauge(ptl::ops::metric_names::kEquity, value);
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_MetricsGauge);
+
+/// Histogram observation, on the latency-recording path.
+void BM_MetricsHistogram(benchmark::State& state) {
+    ptl::ops::MetricsRegistry registry;
+    double micros = 1.0;
+    for (auto _ : state) {
+        micros = micros * 1.0001 + 0.5;
+        registry.observe_micros(ptl::ops::metric_names::kOrderLatency, micros);
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_MetricsHistogram);
+
+/// Quantile extraction, on the scrape path.
+void BM_MetricsSnapshot(benchmark::State& state) {
+    const auto n = static_cast<std::size_t>(state.range(0));
+    ptl::ops::MetricsRegistry registry;
+    for (std::size_t i = 0; i < n; ++i) {
+        registry.increment("counter." + std::to_string(i));
+        registry.set_gauge("gauge." + std::to_string(i), static_cast<double>(i));
+    }
+    registry.observe_micros(ptl::ops::metric_names::kOrderLatency, 250.0);
+
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(registry.snapshot().size());
+    }
+    state.SetItemsProcessed(state.iterations() * state.range(0));
+}
+BENCHMARK(BM_MetricsSnapshot)->Arg(10)->Arg(100);
+
+/// Structured logging through the existing Phase 1 logger, with fields.
+void BM_StructuredLogging(benchmark::State& state) {
+    // Level set above the call so the benchmark measures the ENABLED-CHECK
+    // path, which is what a production INFO-level deployment pays for every
+    // TRACE call site it does not emit.
+    // Loggers are obtained through the Phase 1 registry, not constructed: the
+    // constructor is private so that one subsystem name maps to one logger.
+    ptl::log::Logger& logger = ptl::log::get("bench");
+    logger.set_level(ptl::log::Level::Warn);
+
+    std::uint64_t counter = 0;
+    for (auto _ : state) {
+        ++counter;
+        // DoNotOptimize on the CHECK ITSELF. Without it the compiler proves the
+        // branch is never taken, deletes the whole loop, and the benchmark
+        // reports 0.000 ns -- a number that looks like excellent news and
+        // measures nothing at all.
+        bool enabled = logger.enabled(ptl::log::Level::Debug);
+        benchmark::DoNotOptimize(enabled);
+        if (enabled) {
+            const ptl::log::Field fields[] = {{"orders", counter}};
+            logger.log(ptl::log::Level::Debug, "order submitted", fields);
+        }
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_StructuredLogging);
+
+/// An EMITTED log line, at a level that passes the filter. The other benchmark
+/// measures the suppressed path; this one measures what a line actually costs.
+void BM_StructuredLoggingEmitted(benchmark::State& state) {
+    ptl::log::Logger& logger = ptl::log::get("bench_emit");
+    logger.set_level(ptl::log::Level::Info);
+
+    std::uint64_t counter = 0;
+    for (auto _ : state) {
+        ++counter;
+        const ptl::log::Field fields[] = {{"orders", counter}};
+        logger.log(ptl::log::Level::Info, "order submitted", fields);
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_StructuredLoggingEmitted);
+
+/// Health evaluation across a realistic component count.
+void BM_HealthCheck(benchmark::State& state) {
+    ptl::SimulatedClock clock{ops_t0()};
+    ptl::ops::HealthMonitor monitor{clock};
+    for (int i = 0; i < 12; ++i) {
+        (void)monitor.register_component("component_" + std::to_string(i));
+        monitor.report_healthy("component_" + std::to_string(i));
+    }
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(monitor.trading_permitted());
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_HealthCheck);
+
+/// Circuit breaker decision, taken before every outbound request.
+void BM_CircuitBreaker(benchmark::State& state) {
+    ptl::SimulatedClock clock{ops_t0()};
+    ptl::ops::CircuitBreaker breaker{clock, "venue"};
+    for (auto _ : state) {
+        if (breaker.allow()) breaker.record_success();
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_CircuitBreaker);
+
+/// Alert deduplication: the common case is a repeat, not a new alert.
+void BM_AlertProcessing(benchmark::State& state) {
+    ptl::SimulatedClock clock{ops_t0()};
+    ptl::ops::AlertManager alerts{clock};
+    for (auto _ : state) {
+        alerts.raise(std::string{ptl::ops::alert_keys::kExcessLatency},
+                     ptl::ops::AlertSeverity::Warning, "latency above threshold");
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_AlertProcessing);
+
+/// A full diagnostics snapshot, taken on a cadence.
+void BM_DiagnosticsSnapshot(benchmark::State& state) {
+    ptl::SimulatedClock clock{ops_t0()};
+    ptl::portfolio::Portfolio portfolio;
+    ptl::oms::OrderManager oms;
+    ptl::risk::RiskManager risk{ptl::risk::RiskLimits{}};
+    ptl::ops::HealthMonitor health{clock};
+    ptl::ops::AlertManager alerts{clock};
+    ptl::ops::MetricsRegistry metrics;
+
+    for (int i = 0; i < 8; ++i) {
+        (void)health.register_component("component_" + std::to_string(i));
+        health.report_healthy("component_" + std::to_string(i));
+    }
+
+    ptl::ops::RuntimeDiagnostics diagnostics{clock, portfolio, oms, risk, health, alerts, metrics};
+    diagnostics.set_session("bench", "running");
+
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(diagnostics.snapshot().open_orders);
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_DiagnosticsSnapshot);
+
+/// Resource sampling, excluding the /proc read itself.
+void BM_ResourceSampling(benchmark::State& state) {
+    ptl::SimulatedClock clock{ops_t0()};
+    BenchResourceReader reader;
+    ptl::ops::ResourceMonitor monitor{clock, reader};
+    ptl::ops::MetricsRegistry registry;
+
+    for (auto _ : state) {
+        clock.advance_by(std::chrono::milliseconds{100});
+        auto sample = monitor.sample();
+        benchmark::DoNotOptimize(sample.has_value());
+        monitor.publish(registry);
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_ResourceSampling);
+
+/// Config validation, on the startup path only.
+void BM_ConfigValidation(benchmark::State& state) {
+    const ptl::ops::ConfigValidator validator;
+    ptl::risk::RiskLimits limits;
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(validator.validate_risk(limits).ok());
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_ConfigValidation);
+
+}  // namespace
