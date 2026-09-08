@@ -80,6 +80,19 @@ jobs:
                \( -name '*.hpp' -o -name '*.cpp' \) -print0 \
             | xargs -0 clang-format --dry-run --Werror
 
+  format:
+    name: Formatting
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: clang-format
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y clang-format
+          find include src apps tests benchmarks examples \
+            \( -name '*.hpp' -o -name '*.cpp' \) -print0 \
+            | xargs -0 clang-format --dry-run --Werror
+
   build:
     name: ${{ matrix.name }}
     needs: guards
@@ -93,6 +106,16 @@ jobs:
           - { name: "Linux GCC",         os: ubuntu-latest, preset: linux-gcc-release }
           - { name: "Linux Clang",       os: ubuntu-latest, preset: linux-clang-debug }
           - { name: "ASan + UBSan",      os: ubuntu-latest, preset: asan-ubsan }
+          # C++20 is a supported floor, not an accident. Building it keeps the
+          # codebase from drifting into C++23-only constructs without a
+          # deliberate decision.
+          - { name: "Linux C++20",       os: ubuntu-latest, preset: linux-gcc-release,
+              extra: "-DCMAKE_CXX_STANDARD=20" }
+          # Result<T> has two storage strategies; the fallback is the one used
+          # where std::expected is unavailable, and it is exercised here so it
+          # cannot rot.
+          - { name: "Result fallback",   os: ubuntu-latest, preset: linux-gcc-release,
+              extra: "-DPTL_FORCE_RESULT_FALLBACK=ON" }
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }   # git describe needs history for the RunId
@@ -106,7 +129,7 @@ jobs:
         run: brew install ninja
 
       - name: Configure
-        run: cmake --preset ${{ matrix.preset }}
+        run: cmake --preset ${{ matrix.preset }} ${{ matrix.extra }}
 
       - name: Build
         run: cmake --build --preset ${{ matrix.preset }}
@@ -205,3 +228,47 @@ jobs:
         with:
           name: fingerprint-${{ matrix.os }}
           path: fingerprint-*.txt
+
+  # Benchmarks are built, not run. A benchmark that fails to compile is a broken
+  # build; a benchmark's TIMINGS on shared CI runners are meaningless, so
+  # measuring here would produce numbers nobody should act on.
+  benchmarks:
+    name: Benchmark build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update -qq && sudo apt-get install -y libeigen3-dev ninja-build
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+             -DPTL_BUILD_BENCHMARKS=ON -DPTL_BUILD_TESTS=OFF
+      - name: Build
+        run: cmake --build build
+      - name: Smoke run
+        run: ./build/benchmarks/ptl_bench_core --benchmark_min_time=0.01s
+             --benchmark_filter="BM_RngNext|BM_MetricsIncrement"
+
+  # Verifies the archive a release actually ships: extract into a clean tree,
+  # configure, build, test. A repository that builds in place but not from its
+  # own tarball has a packaging bug nobody notices until release day.
+  package:
+    name: Package verification
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update -qq && sudo apt-get install -y libeigen3-dev ninja-build
+      - name: Create archive
+        run: |
+          tar czf /tmp/ptl.tar.gz --exclude='.git' --exclude='build' .
+      - name: Extract and build
+        run: |
+          mkdir -p /tmp/verify && tar xzf /tmp/ptl.tar.gz -C /tmp/verify
+          cmake -S /tmp/verify -B /tmp/verify/build -G Ninja -DCMAKE_BUILD_TYPE=Debug
+          cmake --build /tmp/verify/build
+          ctest --test-dir /tmp/verify/build --output-on-failure
+      - name: Install
+        run: |
+          cmake --install /tmp/verify/build --prefix /tmp/install
+          test -f /tmp/install/include/ptl/version.hpp
+          test -f /tmp/install/include/ptl/engine/engine.hpp

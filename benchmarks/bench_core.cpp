@@ -120,10 +120,22 @@ void BM_PortfolioApplyFill(benchmark::State& state) {
     ptl::execution::MarketState st;
     st.bid = ptl::Price{500.0};
     st.ask = ptl::Price{500.0};
+    // Displayed size is REQUIRED since Phase 8: a quote with no size at the
+    // touch offers nothing to take, so omitting these produces no fill.
+    st.bid_size = ptl::Qty{1e6};
+    st.ask_size = ptl::Qty{1e6};
     st.interval_volume = ptl::Volume{1e9};
     st.has_quote = true;
     clock.advance_by(std::chrono::seconds{1});
     auto fills = broker.on_market(ptl::InstrumentId{0}, st, clock.now());
+
+    // GUARDED. front() on an empty vector is undefined behaviour, and this
+    // benchmark segfaulted for nine phases because a Phase 8 rule change stopped
+    // the setup producing a fill and nobody ran the full benchmark suite.
+    if (!fills || fills->empty()) {
+        state.SkipWithError("setup produced no fill");
+        return;
+    }
 
     ptl::portfolio::Portfolio pf;
     for (auto _ : state) {
