@@ -1,0 +1,14 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  @apply bg-surface text-content antialiased;
+  /* Tabular figures: columns of prices that jitter as digit widths change are
+     measurably harder to read at a glance. */
+  font-variant-numeric: tabular-nums;
+}

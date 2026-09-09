@@ -1,0 +1,14 @@
+# Backend gateway dependencies.
+#
+# Deliberately NOT installed by the engine's build. A developer building the C++
+# engine needs none of this, and `cmake --build` never touches Python.
+fastapi>=0.115,<1.0
+uvicorn[standard]>=0.30
+pydantic>=2.9,<3.0
+
+# Binding build
+pybind11>=2.12
+
+# Test only
+pytest>=8.0
+httpx>=0.27
