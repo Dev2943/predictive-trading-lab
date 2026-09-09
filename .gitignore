@@ -28,3 +28,19 @@ results/**
 !results/.gitkeep
 *.sqlite
 *.sqlite-journal
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+.env
+
+# CMake
+build/
+CMakeFiles/
+CMakeCache.txt
+
+# Node
+node_modules/
+.next/

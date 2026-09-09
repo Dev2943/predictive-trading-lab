@@ -1,0 +1,1328 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Predictive Trading Lab API",
+    "summary": "Read-only gateway over the Predictive Trading Lab C++ engine.",
+    "description": "The engine is the single source of truth. This layer serializes what the engine computes and never recomputes it.\n\n**Read-only.** Every endpoint is a GET and nothing mutates engine state.\n\n**Two kinds of endpoint.** Capability endpoints report what the engine can do. Artifact endpoints serve what a session previously wrote -- and answer `available: false` when nothing has, rather than returning an empty portfolio that would render as a real book worth nothing.",
+    "version": "0.2.0"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Liveness and engine reachability",
+        "description": "Deliberately does not use the engine dependency: that would turn an unreachable engine into a 503 on the health endpoint itself, which is the one endpoint that must still answer when things are broken.",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/version": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Engine and gateway versions",
+        "operationId": "version_version_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionInfo"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Engine unreachable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fingerprints": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Determinism fingerprints",
+        "description": "The same values `ptl_version` prints. A client can show whether the running engine reproduces the v1.0 reference build.",
+        "operationId": "fingerprints_fingerprints_get",
+        "parameters": [
+          {
+            "name": "seed",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "description": "RNG seed to fingerprint.",
+              "default": 20240101,
+              "title": "Seed"
+            },
+            "description": "RNG seed to fingerprint."
+          },
+          {
+            "name": "config_path",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "config/base.toml",
+              "title": "Config Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Fingerprints"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Configuration could not be read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Engine unreachable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/system": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Health, version and fingerprints in one call",
+        "description": "Aggregated so a client renders a status bar with one request rather than three. Fingerprints are omitted rather than faked when the configuration cannot be read.",
+        "operationId": "system_system_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemInfo"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/config": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Configuration hash for a config file",
+        "description": "Returns the hash the engine computes, not the file contents. The gateway does not parse TOML: doing so would be a second reader that could disagree with the engine's.",
+        "operationId": "config_config_get",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "config/base.toml",
+              "title": "Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/optimization": {
+      "get": {
+        "tags": [
+          "capabilities"
+        ],
+        "summary": "Available portfolio optimizers",
+        "description": "The nine optimizers the engine registers, and what each requires. Running one needs a covariance matrix in a request body and is not part of the read-only surface.",
+        "operationId": "optimization_optimization_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OptimizationCapabilities"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/analytics": {
+      "get": {
+        "tags": [
+          "capabilities"
+        ],
+        "summary": "Available analytics",
+        "description": "What the engine computes. Producing a series requires a return history in a request body and is not part of the read-only surface.",
+        "operationId": "analytics_analytics_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalyticsCapabilities"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/risk": {
+      "get": {
+        "tags": [
+          "capabilities"
+        ],
+        "summary": "Risk limits the engine validates",
+        "description": "Live risk state -- current exposure and utilisation -- requires a running session and is not available in the read-only surface. Serving a zeroed risk panel would show an account with no exposure, which is indistinguishable from a flat book.",
+        "operationId": "risk_risk_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RiskCapabilities"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/artifacts": {
+      "get": {
+        "tags": [
+          "artifacts"
+        ],
+        "summary": "List persisted artifact keys",
+        "operationId": "artifacts_artifacts_get",
+        "parameters": [
+          {
+            "name": "prefix",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Key prefix, e.g. 'paper'.",
+              "default": "",
+              "title": "Prefix"
+            },
+            "description": "Key prefix, e.g. 'paper'."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactList"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/portfolio": {
+      "get": {
+        "tags": [
+          "artifacts"
+        ],
+        "summary": "Account state from the last persisted session snapshot",
+        "description": "Sourced from what a session wrote, not from a live book. `available: false` when no session has run.",
+        "operationId": "portfolio_portfolio_get",
+        "parameters": [
+          {
+            "name": "session",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Session id.",
+              "default": "paper",
+              "title": "Session"
+            },
+            "description": "Session id."
+          },
+          {
+            "name": "mode",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(paper|live)$",
+              "default": "paper",
+              "title": "Mode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortfolioResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/positions": {
+      "get": {
+        "tags": [
+          "artifacts"
+        ],
+        "summary": "Open positions from the last persisted session snapshot",
+        "operationId": "positions_positions_get",
+        "parameters": [
+          {
+            "name": "session",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "paper",
+              "title": "Session"
+            }
+          },
+          {
+            "name": "mode",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(paper|live)$",
+              "default": "paper",
+              "title": "Mode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PositionsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/diagnostics": {
+      "get": {
+        "tags": [
+          "artifacts"
+        ],
+        "summary": "Last persisted live session state",
+        "operationId": "diagnostics_diagnostics_get",
+        "parameters": [
+          {
+            "name": "session",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "live",
+              "title": "Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/metrics": {
+      "get": {
+        "tags": [
+          "artifacts"
+        ],
+        "summary": "Operational metrics from a persisted snapshot",
+        "description": "The engine's ops metrics live in the process that ran the session. The gateway serves the last snapshot written to disk; it does not report its own request counts, which would be gateway telemetry presented as engine state.",
+        "operationId": "metrics_metrics_get",
+        "parameters": [
+          {
+            "name": "session",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "live",
+              "title": "Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/reports": {
+      "get": {
+        "tags": [
+          "artifacts"
+        ],
+        "summary": "List available reports",
+        "operationId": "reports_reports_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactList"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/reports/{experiment_id}": {
+      "get": {
+        "tags": [
+          "artifacts"
+        ],
+        "summary": "One experiment report",
+        "description": "404 when the report does not exist. Unlike portfolio state, a report requested by id is a specific thing the caller believes exists, so absence is an error rather than a normal empty state.",
+        "operationId": "report_reports__experiment_id__get",
+        "parameters": [
+          {
+            "name": "experiment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Experiment identifier.",
+              "title": "Experiment Id"
+            },
+            "description": "Experiment identifier."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such artifact",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Service banner",
+        "operationId": "root__get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object",
+                  "title": "Response Root  Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AccountSummary": {
+        "properties": {
+          "cash": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cash"
+          },
+          "equity": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Equity"
+          },
+          "position_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Position Value"
+          },
+          "realized_pnl": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Realized Pnl"
+          },
+          "unrealized_pnl": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unrealized Pnl"
+          },
+          "gross_exposure": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gross Exposure"
+          },
+          "net_exposure": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Net Exposure"
+          },
+          "available_buying_power": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Available Buying Power"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "title": "AccountSummary",
+        "description": "The account fields a persisted session snapshot carries.\n\nEvery field is optional: a snapshot written by an older session may not\ncarry all of them, and inventing a zero would be worse than omitting it."
+      },
+      "AnalyticsCapabilities": {
+        "properties": {
+          "rolling_metrics": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Rolling Metrics"
+          },
+          "attribution": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Attribution"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "rolling_metrics",
+          "attribution",
+          "note"
+        ],
+        "title": "AnalyticsCapabilities"
+      },
+      "ArtifactEnvelope": {
+        "properties": {
+          "available": {
+            "type": "boolean",
+            "title": "Available"
+          },
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "available",
+          "key"
+        ],
+        "title": "ArtifactEnvelope",
+        "description": "A persisted artifact, or an explicit statement that none exists.\n\n`available: false` is a normal answer, not an error. No session runs inside\nthe gateway, so this data exists only if a session previously wrote it.",
+        "examples": [
+          {
+            "available": true,
+            "data": {
+              "events_processed": 120,
+              "session_id": "demo"
+            },
+            "detail": "",
+            "key": "paper/demo/state"
+          },
+          {
+            "available": false,
+            "detail": "no session state has been persisted at 'paper/never_ran/state'",
+            "key": "paper/never_ran/state"
+          }
+        ]
+      },
+      "ArtifactList": {
+        "properties": {
+          "prefix": {
+            "type": "string",
+            "title": "Prefix"
+          },
+          "keys": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Keys",
+            "description": "Sorted, so two calls agree. Directory order is filesystem-defined."
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "prefix",
+          "keys",
+          "count"
+        ],
+        "title": "ArtifactList"
+      },
+      "ErrorDetail": {
+        "properties": {
+          "detail": {
+            "type": "string",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "detail"
+        ],
+        "title": "ErrorDetail",
+        "description": "The shape of every error body.\n\n`detail` carries the ENGINE's own message where there is one. An optimizer\nthat refuses says why, and that reason is more useful than anything the\ngateway could invent.",
+        "examples": [
+          {
+            "detail": "minimum variance needs a covariance matrix"
+          },
+          {
+            "detail": "config load: no such file (does/not/exist.toml)"
+          }
+        ]
+      },
+      "Fingerprints": {
+        "properties": {
+          "config_hash": {
+            "type": "string",
+            "title": "Config Hash"
+          },
+          "rng": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Rng"
+          },
+          "matches_reference": {
+            "type": "boolean",
+            "title": "Matches Reference",
+            "description": "False means this engine does not reproduce the v1.0 reference build, which is worth knowing before trusting a backtest from it."
+          }
+        },
+        "type": "object",
+        "required": [
+          "config_hash",
+          "rng",
+          "matches_reference"
+        ],
+        "title": "Fingerprints",
+        "examples": [
+          {
+            "config_hash": "30b44e5972450aad",
+            "matches_reference": true,
+            "rng": [
+              "d05ef55272cdfb14",
+              "2e2f422341add64e",
+              "1c120f3d1ce63170"
+            ]
+          }
+        ]
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "HealthResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "degraded",
+              "unavailable"
+            ],
+            "title": "Status",
+            "description": "`unavailable` means the engine could not be reached at all."
+          },
+          "engine_reachable": {
+            "type": "boolean",
+            "title": "Engine Reachable"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "engine_reachable"
+        ],
+        "title": "HealthResponse",
+        "examples": [
+          {
+            "detail": "",
+            "engine_reachable": true,
+            "status": "ok"
+          },
+          {
+            "detail": "the ptl bindings are not importable",
+            "engine_reachable": false,
+            "status": "unavailable"
+          }
+        ]
+      },
+      "OptimizationCapabilities": {
+        "properties": {
+          "optimizers": {
+            "items": {
+              "$ref": "#/components/schemas/OptimizerInfo"
+            },
+            "type": "array",
+            "title": "Optimizers"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "optimizers",
+          "count",
+          "note"
+        ],
+        "title": "OptimizationCapabilities",
+        "examples": [
+          {
+            "count": 9,
+            "note": "Running an optimization requires a request body and arrives in a later phase.",
+            "optimizers": [
+              {
+                "name": "equal_weight",
+                "requires_covariance": false,
+                "requires_expected_returns": false
+              }
+            ]
+          }
+        ]
+      },
+      "OptimizerInfo": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "requires_covariance": {
+            "type": "boolean",
+            "title": "Requires Covariance",
+            "description": "The optimizer refuses without a risk model."
+          },
+          "requires_expected_returns": {
+            "type": "boolean",
+            "title": "Requires Expected Returns",
+            "description": "The optimizer refuses without forecasts. A zero forecast is a real opinion, not an absence of one, so none is assumed."
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "requires_covariance",
+          "requires_expected_returns"
+        ],
+        "title": "OptimizerInfo"
+      },
+      "PortfolioResponse": {
+        "properties": {
+          "available": {
+            "type": "boolean",
+            "title": "Available"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "paper",
+              "live"
+            ],
+            "title": "Mode"
+          },
+          "account": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AccountSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "events_processed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Events Processed"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "available",
+          "mode"
+        ],
+        "title": "PortfolioResponse"
+      },
+      "Position": {
+        "properties": {
+          "instrument": {
+            "type": "integer",
+            "title": "Instrument"
+          },
+          "quantity": {
+            "type": "number",
+            "title": "Quantity"
+          },
+          "average_cost": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Average Cost"
+          },
+          "realized_pnl": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Realized Pnl"
+          }
+        },
+        "type": "object",
+        "required": [
+          "instrument",
+          "quantity"
+        ],
+        "title": "Position"
+      },
+      "PositionsResponse": {
+        "properties": {
+          "available": {
+            "type": "boolean",
+            "title": "Available"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "paper",
+              "live"
+            ],
+            "title": "Mode"
+          },
+          "positions": {
+            "items": {
+              "$ref": "#/components/schemas/Position"
+            },
+            "type": "array",
+            "title": "Positions",
+            "default": []
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "available",
+          "mode"
+        ],
+        "title": "PositionsResponse"
+      },
+      "RiskCapabilities": {
+        "properties": {
+          "validated_limits": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Validated Limits",
+            "description": "Limit fields the engine validates semantically."
+          },
+          "note": {
+            "type": "string",
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "validated_limits",
+          "note"
+        ],
+        "title": "RiskCapabilities"
+      },
+      "SystemInfo": {
+        "properties": {
+          "health": {
+            "$ref": "#/components/schemas/HealthResponse"
+          },
+          "version": {
+            "$ref": "#/components/schemas/VersionInfo"
+          },
+          "fingerprints": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Fingerprints"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Absent when the configuration could not be read."
+          }
+        },
+        "type": "object",
+        "required": [
+          "health",
+          "version"
+        ],
+        "title": "SystemInfo",
+        "description": "Everything a status header needs, in one call.\n\nAggregated so a client does not fan out three requests to render one bar."
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "VersionInfo": {
+        "properties": {
+          "engine_version": {
+            "type": "string",
+            "title": "Engine Version"
+          },
+          "compiler": {
+            "type": "string",
+            "title": "Compiler"
+          },
+          "build_type": {
+            "type": "string",
+            "title": "Build Type"
+          },
+          "transport": {
+            "type": "string",
+            "enum": [
+              "in-process",
+              "remote"
+            ],
+            "title": "Transport",
+            "description": "Where the engine runs. Declared rather than inferred so a client can show it without guessing."
+          },
+          "gateway_version": {
+            "type": "string",
+            "title": "Gateway Version"
+          }
+        },
+        "type": "object",
+        "required": [
+          "engine_version",
+          "compiler",
+          "build_type",
+          "transport",
+          "gateway_version"
+        ],
+        "title": "VersionInfo",
+        "examples": [
+          {
+            "build_type": "Release",
+            "compiler": "GNU",
+            "engine_version": "1.0.0",
+            "gateway_version": "0.2.0",
+            "transport": "in-process"
+          }
+        ]
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "system",
+      "description": "Health, version, determinism, config."
+    },
+    {
+      "name": "capabilities",
+      "description": "What the engine can compute."
+    },
+    {
+      "name": "artifacts",
+      "description": "State a session previously persisted."
+    }
+  ]
+}

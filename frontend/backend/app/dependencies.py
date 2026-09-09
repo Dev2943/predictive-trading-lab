@@ -35,4 +35,23 @@ def get_engine() -> EngineClient:
         ) from exc
 
 
+def probe_engine() -> EngineClient | None:
+    """Reachability probe that returns None instead of raising.
+
+    `/health` must answer 200 even when the engine is down -- it is the one
+    endpoint that has to work when everything else does not. It therefore
+    cannot depend on `get_engine`, which raises.
+
+    This is a separate DEPENDENCY rather than a direct call inside the route,
+    so a test can override it. A route that calls `get_engine()` directly
+    bypasses FastAPI's injection entirely, which makes the unreachable-engine
+    path unreachable in tests -- exactly the path most worth testing.
+    """
+    try:
+        return _client()
+    except EngineUnavailable:
+        return None
+
+
 Engine = Annotated[EngineClient, Depends(get_engine)]
+MaybeEngine = Annotated[EngineClient | None, Depends(probe_engine)]

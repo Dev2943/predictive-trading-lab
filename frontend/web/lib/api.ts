@@ -63,8 +63,16 @@ export interface HealthResponse {
   detail: string;
 }
 
+export interface SystemInfo {
+  health: HealthResponse;
+  version: VersionInfo;
+  fingerprints: Fingerprints | null;
+}
+
 export const api = {
   health: () => request<HealthResponse>("/health"),
   version: () => request<VersionInfo>("/version"),
   fingerprints: () => request<Fingerprints>("/fingerprints"),
+  /** One request for a status header, rather than three. */
+  system: () => request<SystemInfo>("/system"),
 };
