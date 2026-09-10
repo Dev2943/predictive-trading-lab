@@ -37,8 +37,13 @@ def client(engine: FakeEngineClient):
 # ---------------------------------------------------------------------------
 
 
-def test_every_endpoint_is_a_get():
-    """THE LOAD-BEARING TEST for F2.
+def test_mutation_is_confined_to_the_session_lifecycle():
+    """THE LOAD-BEARING TEST.
+
+    F3 introduces the first endpoints that change anything. This asserts they
+    are exactly the session lifecycle routes and nothing else -- a POST that
+    appeared on /portfolio or /orders would be a mutation path the architecture
+    does not permit.
 
     Read from the OPENAPI SCHEMA, not from `app.routes`. FastAPI wraps included
     routers in `_IncludedRouter` objects that are not flattened until the schema
@@ -46,10 +51,23 @@ def test_every_endpoint_is_a_get():
     would pass whatever verbs they used -- a guard that assures nothing.
     """
     schema = app.openapi()
+
+    mutating = {
+        path
+        for path, operations in schema["paths"].items()
+        if set(operations) - {"get"}
+    }
+    assert mutating == {"/session/start", "/session/stop", "/session/reset"}
+
+    for path, operations in schema["paths"].items():
+        if path not in mutating:
+            assert set(operations) == {"get"}, f"{path} exposes a non-GET verb"
+
+    # No verb that implies deletion or replacement, anywhere.
     verbs = {verb for operations in schema["paths"].values() for verb in operations}
-    assert verbs == {"get"}
-    # And the endpoints really are there, so the assertion above is not vacuous.
-    assert len(schema["paths"]) >= 15
+    assert verbs <= {"get", "post"}
+    # And the surface is real, so the assertions above are not vacuous.
+    assert len(schema["paths"]) >= 20
 
 
 def test_the_documented_surface_is_present():

@@ -279,3 +279,123 @@ class ErrorDetail(BaseModel):
     )
 
     detail: str
+
+
+# ---------------------------------------------------------------------------
+# Session (F3)
+# ---------------------------------------------------------------------------
+
+
+class StartRequest(BaseModel):
+    """Parameters for a new paper session.
+
+    `seed` makes the run reproducible: the same seed replays the same synthetic
+    session, so a result can be reproduced rather than merely described.
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "session_id": "paper",
+                    "seed": 20240101,
+                    "bars": 390,
+                    "starting_cash": 1000000.0,
+                }
+            ]
+        }
+    )
+
+    session_id: str = Field(default="paper", min_length=1, max_length=64)
+    seed: int = Field(default=20240101, gt=0, description="Zero is rejected: a run whose seed is unknown cannot be reproduced.")
+    bars: int = Field(default=390, gt=0, le=5000)
+    starting_cash: float = Field(default=1_000_000.0, gt=0)
+
+
+class EngineSessionState(BaseModel):
+    """The host's own view. Every field optional: before the first start there
+    is no session to describe, and inventing zeros would show a book that does
+    not exist."""
+
+    state: str | None = None
+    has_session: bool | None = None
+    session_id: str | None = None
+    seed: int | None = None
+    data_source: str | None = Field(
+        default=None,
+        description="`synthetic-replay` until ADR-0001's entitlement is verified.",
+    )
+    phase: str | None = None
+    trading_permitted: bool | None = None
+    events_processed: int | None = None
+    orders_submitted: int | None = None
+    orders_rejected: int | None = None
+    fills_received: int | None = None
+    persists: int | None = None
+    started_at: str | None = None
+    error: str | None = None
+
+
+class SessionStatus(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "state": "RUNNING",
+                    "error": None,
+                    "replay_exhausted": False,
+                    "engine": {"phase": "running", "events_processed": 120},
+                }
+            ]
+        }
+    )
+
+    state: Literal["STOPPED", "STARTING", "RUNNING", "STOPPING", "ERROR"]
+    error: str | None = None
+    replay_exhausted: bool = Field(
+        default=False,
+        description=(
+            "The replay ran out of events. Not an error and not a stop: the "
+            "book stays readable, as a live session between market events."
+        ),
+    )
+    engine: EngineSessionState = Field(default_factory=EngineSessionState)
+
+
+class SessionActionResponse(BaseModel):
+    action: Literal["start", "stop", "reset"]
+    state: str
+
+
+class OpenOrder(BaseModel):
+    order_id: int
+    instrument: int
+    side: int = Field(description="1 for buy, -1 for sell.")
+    quantity: float
+    filled: float
+
+
+class FillRecord(BaseModel):
+    ts: str
+    order_id: int
+    instrument: int
+    side: int
+    quantity: float
+    price: float
+    commission: float
+
+
+class SessionSnapshot(BaseModel):
+    """One consistent read of the session."""
+
+    state: str
+    available: bool = Field(
+        description="False before a session has started. Not an empty portfolio."
+    )
+    account: AccountSummary | None = None
+    positions: list[Position] = []
+    orders: list[OpenOrder] = []
+    fills: list[FillRecord] = Field(
+        default=[], description="Most recent first, bounded to the last 200."
+    )
+    engine: EngineSessionState = Field(default_factory=EngineSessionState)

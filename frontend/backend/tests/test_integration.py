@@ -112,3 +112,87 @@ def test_optimizer_requirements_match_the_engines_own_refusals(client):
                 covariance=covariance,
                 signals=[0.5] * 4,
             )
+
+
+# ---------------------------------------------------------------------------
+# F3: a real PaperSession through the host
+# ---------------------------------------------------------------------------
+
+
+def test_a_real_paper_session_runs_end_to_end():
+    """The fake backend proves the state machine; this proves the engine.
+
+    Runs a genuine PaperSession -- engine, broker, OMS, risk, portfolio,
+    journal -- and asserts it produced orders, fills and a moved book.
+    """
+    import json as _json
+    import time as _time
+
+    from app.engine import SessionDriver, SessionState
+
+    driver = SessionDriver(ptl, step_size=50)
+    try:
+        driver.start(session_id="integration", seed=20240101, bars=200)
+        assert driver.state is SessionState.RUNNING
+
+        deadline = _time.monotonic() + 10.0
+        while _time.monotonic() < deadline:
+            if driver.status()["replay_exhausted"]:
+                break
+            _time.sleep(0.02)
+
+        snapshot = driver.snapshot()
+        engine_state = snapshot["state"]
+        assert engine_state["events_processed"] > 0
+        assert engine_state["orders_submitted"] > 0
+        assert engine_state["fills_received"] > 0
+        # The data source is labelled, so nothing downstream can mistake a
+        # synthetic replay for a live feed.
+        assert engine_state["data_source"] == "synthetic-replay"
+
+        account = snapshot["portfolio"]["account"]
+        assert account["equity"] != 0.0
+
+        driver.stop()
+        assert driver.state is SessionState.STOPPED
+    finally:
+        driver.shutdown()
+
+
+def test_the_same_seed_reproduces_the_same_session():
+    """Determinism survives the host.
+
+    Two sessions with one seed must produce identical counters. If they did
+    not, the session host would have introduced non-determinism the engine does
+    not have.
+    """
+    import time as _time
+
+    from app.engine import SessionDriver
+
+    def run() -> dict:
+        driver = SessionDriver(ptl, step_size=50)
+        try:
+            driver.start(session_id="determinism", seed=4242, bars=150)
+            deadline = _time.monotonic() + 10.0
+            while _time.monotonic() < deadline:
+                if driver.status()["replay_exhausted"]:
+                    break
+                _time.sleep(0.02)
+            state = dict(driver.snapshot()["state"])
+            account = dict(driver.snapshot()["portfolio"]["account"])
+            driver.stop()
+            return {
+                "events": state["events_processed"],
+                "orders": state["orders_submitted"],
+                "fills": state["fills_received"],
+                "equity": account["equity"],
+            }
+        finally:
+            driver.shutdown()
+
+    first = run()
+    second = run()
+    # EXACT equality on equity: float summation is not associative, so any
+    # ordering difference would surface in the last bits.
+    assert first == second

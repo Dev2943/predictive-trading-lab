@@ -61,11 +61,16 @@ add_subdirectory("${PTL_ENGINE_ROOT}" "${CMAKE_BINARY_DIR}/engine" EXCLUDE_FROM_
 find_package(Python3 COMPONENTS Interpreter Development.Module REQUIRED)
 find_package(pybind11 CONFIG REQUIRED)
 
-pybind11_add_module(ptl MODULE ptl_bindings.cpp)
+pybind11_add_module(ptl MODULE ptl_bindings.cpp session_host.cpp)
 
 target_link_libraries(ptl
     PRIVATE ptl::core ptl::config ptl::optimization ptl::analytics
-            ptl::attribution ptl::risk ptl::ops)
+            ptl::attribution ptl::risk ptl::ops
+            # F3: the session host owns a real PaperSession, so it links the
+            # engine, execution, paper and storage layers too. Python still
+            # sees none of them.
+            ptl::engine ptl::execution ptl::paper ptl::portfolio ptl::oms
+            ptl::market ptl::accounting ptl::storage)
 
 # The generated version header lives in the engine's build tree, so the module
 # reports the same version and git provenance the engine binaries do.

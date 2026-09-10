@@ -13,7 +13,12 @@ from typing import Annotated
 
 from fastapi import Depends, HTTPException, status
 
-from .engine import EngineClient, EngineUnavailable, InProcessEngineClient
+from .engine import (
+    EngineClient,
+    EngineUnavailable,
+    InProcessEngineClient,
+    SessionDriver,
+)
 
 
 @functools.lru_cache(maxsize=1)
@@ -55,3 +60,29 @@ def probe_engine() -> EngineClient | None:
 
 Engine = Annotated[EngineClient, Depends(get_engine)]
 MaybeEngine = Annotated[EngineClient | None, Depends(probe_engine)]
+
+
+@functools.lru_cache(maxsize=1)
+def _driver() -> SessionDriver:
+    """The single session driver.
+
+    One per process, enforced by the cache. The host it drives is itself a
+    single C++ instance, so there is exactly one PaperSession in existence and
+    no route can create a second.
+    """
+    import ptl
+
+    return SessionDriver(ptl)
+
+
+def get_driver() -> SessionDriver:
+    try:
+        return _driver()
+    except (ImportError, EngineUnavailable) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"the session host is unavailable: {exc}",
+        ) from exc
+
+
+Driver = Annotated[SessionDriver, Depends(get_driver)]

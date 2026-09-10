@@ -607,6 +607,207 @@
         }
       }
     },
+    "/session": {
+      "get": {
+        "tags": [
+          "session"
+        ],
+        "summary": "Current session lifecycle state",
+        "description": "Served from the snapshot the driver published, so reading never touches the session and costs the trading loop nothing.",
+        "operationId": "session_session_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/session/state": {
+      "get": {
+        "tags": [
+          "session"
+        ],
+        "summary": "Alias of GET /session",
+        "operationId": "session_state_session_state_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/session/start": {
+      "post": {
+        "tags": [
+          "session"
+        ],
+        "summary": "Start a paper session",
+        "description": "Refused with 409 if a session is already running: starting a second would abandon the first one's book without closing it out.\n\nMarket data is a **deterministic synthetic replay**. ADR-0001's entitlement is unverified and no live feed exists, so a given seed always produces the same session.",
+        "operationId": "start_session_start_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionActionResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The current lifecycle state does not permit this.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/session/stop": {
+      "post": {
+        "tags": [
+          "session"
+        ],
+        "summary": "Stop the running session",
+        "description": "Runs the engine's close-out: on_stop, trade matching and journal reconciliation, the same sequence a backtest performs.",
+        "operationId": "stop_session_stop_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionActionResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The current lifecycle state does not permit this.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/session/reset": {
+      "post": {
+        "tags": [
+          "session"
+        ],
+        "summary": "Stop the session and start a new one",
+        "description": "Explicitly **not** an in-place reset. Discarding a book where it stands would skip the close-out that reconciles the journal, so this is a stop followed by a start with the same guarantees as performing them separately.",
+        "operationId": "reset_session_reset_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionActionResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The current lifecycle state does not permit this.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/session/snapshot": {
+      "get": {
+        "tags": [
+          "session"
+        ],
+        "summary": "Account, positions, orders and fills in one consistent read",
+        "description": "A single document, so a dashboard renders one instant. Assembling it from four calls would let the account and the positions come from different moments.",
+        "operationId": "snapshot_session_snapshot_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionSnapshot"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/": {
       "get": {
         "tags": [
@@ -849,6 +1050,168 @@
         ],
         "title": "ArtifactList"
       },
+      "EngineSessionState": {
+        "properties": {
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State"
+          },
+          "has_session": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Has Session"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed"
+          },
+          "data_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data Source",
+            "description": "`synthetic-replay` until ADR-0001's entitlement is verified."
+          },
+          "phase": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phase"
+          },
+          "trading_permitted": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trading Permitted"
+          },
+          "events_processed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Events Processed"
+          },
+          "orders_submitted": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Orders Submitted"
+          },
+          "orders_rejected": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Orders Rejected"
+          },
+          "fills_received": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fills Received"
+          },
+          "persists": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Persists"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "title": "EngineSessionState",
+        "description": "The host's own view. Every field optional: before the first start there\nis no session to describe, and inventing zeros would show a book that does\nnot exist."
+      },
       "ErrorDetail": {
         "properties": {
           "detail": {
@@ -870,6 +1233,49 @@
             "detail": "config load: no such file (does/not/exist.toml)"
           }
         ]
+      },
+      "FillRecord": {
+        "properties": {
+          "ts": {
+            "type": "string",
+            "title": "Ts"
+          },
+          "order_id": {
+            "type": "integer",
+            "title": "Order Id"
+          },
+          "instrument": {
+            "type": "integer",
+            "title": "Instrument"
+          },
+          "side": {
+            "type": "integer",
+            "title": "Side"
+          },
+          "quantity": {
+            "type": "number",
+            "title": "Quantity"
+          },
+          "price": {
+            "type": "number",
+            "title": "Price"
+          },
+          "commission": {
+            "type": "number",
+            "title": "Commission"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ts",
+          "order_id",
+          "instrument",
+          "side",
+          "quantity",
+          "price",
+          "commission"
+        ],
+        "title": "FillRecord"
       },
       "Fingerprints": {
         "properties": {
@@ -962,6 +1368,40 @@
             "status": "unavailable"
           }
         ]
+      },
+      "OpenOrder": {
+        "properties": {
+          "order_id": {
+            "type": "integer",
+            "title": "Order Id"
+          },
+          "instrument": {
+            "type": "integer",
+            "title": "Instrument"
+          },
+          "side": {
+            "type": "integer",
+            "title": "Side",
+            "description": "1 for buy, -1 for sell."
+          },
+          "quantity": {
+            "type": "number",
+            "title": "Quantity"
+          },
+          "filled": {
+            "type": "number",
+            "title": "Filled"
+          }
+        },
+        "type": "object",
+        "required": [
+          "order_id",
+          "instrument",
+          "side",
+          "quantity",
+          "filled"
+        ],
+        "title": "OpenOrder"
       },
       "OptimizationCapabilities": {
         "properties": {
@@ -1194,6 +1634,179 @@
         ],
         "title": "RiskCapabilities"
       },
+      "SessionActionResponse": {
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "start",
+              "stop",
+              "reset"
+            ],
+            "title": "Action"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          }
+        },
+        "type": "object",
+        "required": [
+          "action",
+          "state"
+        ],
+        "title": "SessionActionResponse"
+      },
+      "SessionSnapshot": {
+        "properties": {
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "available": {
+            "type": "boolean",
+            "title": "Available",
+            "description": "False before a session has started. Not an empty portfolio."
+          },
+          "account": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AccountSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "positions": {
+            "items": {
+              "$ref": "#/components/schemas/Position"
+            },
+            "type": "array",
+            "title": "Positions",
+            "default": []
+          },
+          "orders": {
+            "items": {
+              "$ref": "#/components/schemas/OpenOrder"
+            },
+            "type": "array",
+            "title": "Orders",
+            "default": []
+          },
+          "fills": {
+            "items": {
+              "$ref": "#/components/schemas/FillRecord"
+            },
+            "type": "array",
+            "title": "Fills",
+            "description": "Most recent first, bounded to the last 200.",
+            "default": []
+          },
+          "engine": {
+            "$ref": "#/components/schemas/EngineSessionState"
+          }
+        },
+        "type": "object",
+        "required": [
+          "state",
+          "available"
+        ],
+        "title": "SessionSnapshot",
+        "description": "One consistent read of the session."
+      },
+      "SessionStatus": {
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "STOPPED",
+              "STARTING",
+              "RUNNING",
+              "STOPPING",
+              "ERROR"
+            ],
+            "title": "State"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "replay_exhausted": {
+            "type": "boolean",
+            "title": "Replay Exhausted",
+            "description": "The replay ran out of events. Not an error and not a stop: the book stays readable, as a live session between market events.",
+            "default": false
+          },
+          "engine": {
+            "$ref": "#/components/schemas/EngineSessionState"
+          }
+        },
+        "type": "object",
+        "required": [
+          "state"
+        ],
+        "title": "SessionStatus",
+        "examples": [
+          {
+            "engine": {
+              "events_processed": 120,
+              "phase": "running"
+            },
+            "replay_exhausted": false,
+            "state": "RUNNING"
+          }
+        ]
+      },
+      "StartRequest": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Session Id",
+            "default": "paper"
+          },
+          "seed": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Seed",
+            "description": "Zero is rejected: a run whose seed is unknown cannot be reproduced.",
+            "default": 20240101
+          },
+          "bars": {
+            "type": "integer",
+            "maximum": 5000.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Bars",
+            "default": 390
+          },
+          "starting_cash": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Starting Cash",
+            "default": 1000000.0
+          }
+        },
+        "type": "object",
+        "title": "StartRequest",
+        "description": "Parameters for a new paper session.\n\n`seed` makes the run reproducible: the same seed replays the same synthetic\nsession, so a result can be reproduced rather than merely described.",
+        "examples": [
+          {
+            "bars": 390,
+            "seed": 20240101,
+            "session_id": "paper",
+            "starting_cash": 1000000.0
+          }
+        ]
+      },
       "SystemInfo": {
         "properties": {
           "health": {
@@ -1323,6 +1936,10 @@
     {
       "name": "artifacts",
       "description": "State a session previously persisted."
+    },
+    {
+      "name": "session",
+      "description": "Paper session lifecycle. The only endpoints that change anything, and they do so by enqueuing a command rather than touching the session."
     }
   ]
 }

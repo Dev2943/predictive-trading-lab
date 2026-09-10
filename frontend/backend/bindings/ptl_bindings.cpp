@@ -43,6 +43,7 @@
 #include "ptl/core/types.hpp"
 #include "ptl/core/version.hpp"
 #include "ptl/optimization/optimizer.hpp"
+#include "session_host.hpp"
 #include "ptl/ops/diagnostics.hpp"
 
 namespace py = pybind11;
@@ -386,6 +387,43 @@ template <typename T>
     return validator.validate_risk(limits).to_json();
 }
 
+// ---------------------------------------------------------------------------
+// Session host
+// ---------------------------------------------------------------------------
+
+/// The single paper session host.
+///
+/// ONE INSTANCE, enforced by construction: a function-local static means there
+/// is exactly one for the life of the process, and Python cannot construct
+/// another because the type is never bound.
+///
+/// NOT THREAD-SAFE, DELIBERATELY. Exactly one Python thread -- the session
+/// driver -- may call the mutating methods. Readers consume snapshots the
+/// driver published and never call in here at all, which is what keeps the
+/// engine single-threaded and free of any lock on the trading path.
+[[nodiscard]] ptl_host::PaperSessionHost& host() {
+    static ptl_host::PaperSessionHost instance;
+    return instance;
+}
+
+[[nodiscard]] bool host_start(const std::string& session_id, std::uint64_t seed,
+                              std::size_t bars, double starting_cash,
+                              const std::string& artifact_root) {
+    ptl_host::StartOptions options;
+    options.session_id = session_id;
+    options.seed = seed;
+    options.bars = bars;
+    options.starting_cash = starting_cash;
+    options.artifact_root = artifact_root;
+    return unwrap(host().start(options), "session start");
+}
+
+[[nodiscard]] bool host_stop() { return unwrap(host().stop(), "session stop"); }
+
+[[nodiscard]] std::size_t host_step(std::size_t max_events) {
+    return unwrap(host().step(max_events), "session step");
+}
+
 }  // namespace
 
 PYBIND11_MODULE(ptl, m) {
@@ -432,6 +470,25 @@ PYBIND11_MODULE(ptl, m) {
 
     m.def("factor_contribution", &factor_contribution, py::arg("portfolio"),
           py::arg("benchmark"), "Split returns into beta and alpha contributions.");
+
+    // --- session host --------------------------------------------------
+    // Only these five functions exist. `Engine`, `PaperSession`, `PaperBroker`
+    // and `PaperAccount` are never bound: Python holds no handle to any of
+    // them, and every answer crosses as JSON.
+    m.def("session_start", &host_start, py::arg("session_id") = "paper",
+          py::arg("seed") = 20240101, py::arg("bars") = 390,
+          py::arg("starting_cash") = 1'000'000.0,
+          py::arg("artifact_root") = "results",
+          "Start the paper session. Raises if one is already running.");
+    m.def("session_stop", &host_stop,
+          "Stop and destroy the session. Raises if none is running.");
+    m.def("session_step", &host_step, py::arg("max_events") = 1,
+          "Advance the session. Returns events processed; zero means the replay "
+          "is exhausted, which is not an error.");
+    m.def("session_state", []() { return host().state_json(); },
+          "Lifecycle state and counters, as JSON.");
+    m.def("session_snapshot", []() { return host().snapshot_json(); },
+          "Account, positions, orders and fills in one consistent document.");
 
     m.def("validate_risk_limits", &validate_risk_limits,
           py::arg("max_order_notional") = 1e6, py::arg("max_position_notional") = 1e6,

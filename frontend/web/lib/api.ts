@@ -69,10 +69,95 @@ export interface SystemInfo {
   fingerprints: Fingerprints | null;
 }
 
+export interface SessionStatus {
+  state: "STOPPED" | "STARTING" | "RUNNING" | "STOPPING" | "ERROR";
+  error: string | null;
+  replay_exhausted: boolean;
+  engine: Record<string, unknown> & {
+    events_processed?: number;
+    orders_submitted?: number;
+    orders_rejected?: number;
+    fills_received?: number;
+    data_source?: string;
+    phase?: string;
+  };
+}
+
+export interface AccountSummary {
+  cash: number | null;
+  equity: number | null;
+  position_value: number | null;
+  realized_pnl: number | null;
+  unrealized_pnl: number | null;
+  gross_exposure: number | null;
+  net_exposure: number | null;
+  available_buying_power: number | null;
+  status: string | null;
+}
+
+export interface Position {
+  instrument: number;
+  quantity: number;
+  average_cost: number | null;
+  realized_pnl: number | null;
+}
+
+export interface OpenOrder {
+  order_id: number;
+  instrument: number;
+  side: number;
+  quantity: number;
+  filled: number;
+}
+
+export interface Fill {
+  ts: string;
+  order_id: number;
+  instrument: number;
+  side: number;
+  quantity: number;
+  price: number;
+  commission: number;
+}
+
+export interface SessionSnapshot {
+  state: string;
+  available: boolean;
+  account: AccountSummary | null;
+  positions: Position[];
+  orders: OpenOrder[];
+  fills: Fill[];
+  engine: SessionStatus["engine"];
+}
+
+export interface StartRequest {
+  session_id?: string;
+  seed?: number;
+  bars?: number;
+  starting_cash?: number;
+}
+
 export const api = {
   health: () => request<HealthResponse>("/health"),
   version: () => request<VersionInfo>("/version"),
   fingerprints: () => request<Fingerprints>("/fingerprints"),
   /** One request for a status header, rather than three. */
   system: () => request<SystemInfo>("/system"),
+
+  session: () => request<SessionStatus>("/session"),
+  /** One consistent read: account, positions, orders and fills at one instant. */
+  snapshot: () => request<SessionSnapshot>("/session/snapshot"),
+
+  startSession: (body: StartRequest = {}) =>
+    request<{ action: string; state: string }>("/session/start", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  stopSession: () =>
+    request<{ action: string; state: string }>("/session/stop", { method: "POST" }),
+  resetSession: (body: StartRequest = {}) =>
+    request<{ action: string; state: string }>("/session/reset", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
 };

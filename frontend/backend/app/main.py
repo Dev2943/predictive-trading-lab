@@ -14,7 +14,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routers import artifacts, capabilities, system
+from .routers import artifacts, capabilities, session, system
 
 app = FastAPI(
     title="Predictive Trading Lab API",
@@ -38,22 +38,38 @@ app = FastAPI(
             "name": "artifacts",
             "description": "State a session previously persisted.",
         },
+        {
+            "name": "session",
+            "description": (
+                "Paper session lifecycle. The only endpoints that change "
+                "anything, and they do so by enqueuing a command rather than "
+                "touching the session."
+            ),
+        },
     ],
 )
 
 # Restricted to the Next.js dev origin rather than "*": a wildcard on an API
 # that will later place orders is a habit worth not forming.
+# Restricted to the Next.js dev origin rather than "*": a wildcard on an API
+# that will later place orders is a habit worth not forming.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3001",
+    ],
     allow_credentials=True,
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
 app.include_router(system.router)
 app.include_router(capabilities.router)
 app.include_router(artifacts.router)
+app.include_router(session.router)
 
 
 @app.get("/", tags=["system"], summary="Service banner")
@@ -62,5 +78,5 @@ def root() -> dict[str, str]:
         "service": "predictive-trading-lab-api",
         "docs": "/docs",
         "openapi": "/openapi.json",
-        "phase": "F2 (read-only)",
+        "phase": "F3 (session host)",
     }

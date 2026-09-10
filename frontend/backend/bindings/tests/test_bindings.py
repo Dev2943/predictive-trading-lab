@@ -56,8 +56,22 @@ def test_sessions_are_not_reachable_from_python():
     later binds one for convenience, it fails here.
     """
     exposed = set(dir(ptl))
-    for forbidden in ("Engine", "PaperSession", "LiveSession", "BrokerSimulator"):
+    for forbidden in (
+        "Engine",
+        "PaperSession",
+        "LiveSession",
+        "BrokerSimulator",
+        "PaperBroker",
+        "PaperAccount",
+        "PaperSessionHost",
+    ):
         assert forbidden not in exposed
+
+    # F3 added a session host, and it is reachable only through free functions
+    # returning JSON. No bound class means no handle to engine state.
+    for name in ("session_start", "session_stop", "session_state"):
+        assert callable(getattr(ptl, name))
+        assert not isinstance(getattr(ptl, name), type)
 
 
 def test_only_the_intended_surface_is_exposed():
@@ -71,6 +85,13 @@ def test_only_the_intended_surface_is_exposed():
         "rng_fingerprint",
         "rolling_metrics",
         "validate_risk_limits",
+        # F3 session host. Five FUNCTIONS, no types: the host owns the session
+        # in C++ and Python never receives a handle to it.
+        "session_snapshot",
+        "session_start",
+        "session_state",
+        "session_step",
+        "session_stop",
     }
 
 
