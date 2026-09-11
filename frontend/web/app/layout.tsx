@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { Nav } from "@/components/nav";
 import { Providers } from "./providers";
 
 export const metadata: Metadata = {
@@ -11,7 +12,15 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" className="dark">
       <body>
-        <Providers>{children}</Providers>
+        <Providers>
+          <div className="mx-auto max-w-6xl p-8 font-mono text-sm">
+            <header className="mb-4">
+              <h1 className="text-lg">Predictive Trading Lab</h1>
+            </header>
+            <Nav />
+            {children}
+          </div>
+        </Providers>
       </body>
     </html>
   );

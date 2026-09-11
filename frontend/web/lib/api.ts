@@ -167,6 +167,72 @@ export interface StartRequest {
   starting_cash?: number;
 }
 
+export interface OptimizeRequest {
+  optimizer: string;
+  expected_returns?: number[];
+  volatilities?: number[];
+  covariance?: number[][];
+  signals?: number[];
+  symbols?: string[];
+  max_position?: number;
+  long_only?: boolean;
+  max_gross_leverage?: number;
+  risk_aversion?: number;
+  target_volatility?: number;
+}
+
+export interface OptimizeResponse {
+  status: string;
+  weights: number[];
+  symbols: string[];
+  expected_return: number;
+  expected_volatility: number;
+  sharpe: number;
+  gross_exposure: number;
+  net_exposure: number;
+  cash_weight: number;
+  turnover: number;
+  iterations: number;
+  binding_constraints: string[];
+  detail: string;
+}
+
+export interface OptimizerInfo {
+  name: string;
+  requires_covariance: boolean;
+  requires_expected_returns: boolean;
+}
+
+export interface OptimizationCapabilities {
+  optimizers: OptimizerInfo[];
+  count: number;
+  note: string;
+}
+
+export interface RiskLimits {
+  max_order_notional: number;
+  max_position_notional: number;
+  max_gross_leverage: number;
+  max_concentration: number;
+  max_drawdown_pct: number;
+  max_daily_turnover: number;
+  require_live: boolean;
+}
+
+export interface ValidationIssue {
+  severity: "warning" | "fatal";
+  field: string;
+  message: string;
+  remedy: string;
+}
+
+export interface ValidationResponse {
+  ok: boolean;
+  fatal: number;
+  warnings: number;
+  issues: ValidationIssue[];
+}
+
 export const api = {
   health: () => request<HealthResponse>("/health"),
   version: () => request<VersionInfo>("/version"),
@@ -177,6 +243,18 @@ export const api = {
   session: () => request<SessionStatus>("/session"),
   history: () => request<EquityHistory>("/session/history"),
   instruments: () => request<Instrument[]>("/session/instruments"),
+
+  optimizers: () => request<OptimizationCapabilities>("/optimization"),
+  optimize: (body: OptimizeRequest) =>
+    request<OptimizeResponse>("/optimization/optimize", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  validateRisk: (body: RiskLimits) =>
+    request<ValidationResponse>("/risk/validate", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   /** One consistent read: account, positions, orders and fills at one instant. */
   snapshot: () => request<SessionSnapshot>("/session/snapshot"),
 
