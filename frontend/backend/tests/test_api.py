@@ -37,37 +37,63 @@ def client(engine: FakeEngineClient):
 # ---------------------------------------------------------------------------
 
 
-def test_mutation_is_confined_to_the_session_lifecycle():
+# POST endpoints fall into exactly two kinds, and conflating them is how a
+# mutation path gets added without anyone noticing.
+LIFECYCLE_POSTS = {"/session/start", "/session/stop", "/session/reset"}
+COMPUTE_POSTS = {
+    "/optimization/optimize",
+    "/optimization/covariance",
+    "/analytics/rolling",
+    "/analytics/attribution/factors",
+    "/risk/validate",
+}
+
+
+def test_post_endpoints_are_either_lifecycle_or_stateless_computation():
     """THE LOAD-BEARING TEST.
 
-    F3 introduces the first endpoints that change anything. This asserts they
-    are exactly the session lifecycle routes and nothing else -- a POST that
-    appeared on /portfolio or /orders would be a mutation path the architecture
-    does not permit.
+    Every POST must be an explicitly classified one. A new POST appearing on
+    /portfolio or /orders would fail here, which is the point: the classification
+    is a decision someone has to make deliberately rather than drift into.
 
-    Read from the OPENAPI SCHEMA, not from `app.routes`. FastAPI wraps included
+    Read from the OPENAPI SCHEMA, not `app.routes`. FastAPI wraps included
     routers in `_IncludedRouter` objects that are not flattened until the schema
-    is built, so a scan of `app.routes` would never see the router endpoints and
-    would pass whatever verbs they used -- a guard that assures nothing.
+    is built, so scanning `app.routes` would never see router endpoints and
+    would pass whatever verbs they used.
     """
     schema = app.openapi()
+    posts = {path for path, operations in schema["paths"].items() if "post" in operations}
+    assert posts == LIFECYCLE_POSTS | COMPUTE_POSTS
 
-    mutating = {
-        path
-        for path, operations in schema["paths"].items()
-        if set(operations) - {"get"}
-    }
-    assert mutating == {"/session/start", "/session/stop", "/session/reset"}
-
-    for path, operations in schema["paths"].items():
-        if path not in mutating:
-            assert set(operations) == {"get"}, f"{path} exposes a non-GET verb"
-
-    # No verb that implies deletion or replacement, anywhere.
+    # Nothing else, anywhere.
     verbs = {verb for operations in schema["paths"].values() for verb in operations}
     assert verbs <= {"get", "post"}
-    # And the surface is real, so the assertions above are not vacuous.
-    assert len(schema["paths"]) >= 20
+
+    for path, operations in schema["paths"].items():
+        if path not in posts:
+            assert set(operations) == {"get"}, f"{path} exposes a non-GET verb"
+
+    # The surface is real, so the assertions above are not vacuous.
+    assert len(schema["paths"]) >= 25
+
+
+def test_compute_endpoints_do_not_touch_the_session(client):
+    """Stateless computation reaches the engine directly, by design.
+
+    It must never require a session, or a dashboard could not price a portfolio
+    before trading starts.
+    """
+    engine = FakeEngineClient()
+    with make_client(engine) as compute_client:
+        response = compute_client.post(
+            "/optimization/optimize",
+            json={"optimizer": "equal_weight", "volatilities": [0.1] * 3},
+        )
+    app.dependency_overrides.clear()
+    # The fake refuses (it is not a real engine), but the point is that the
+    # request was routed and answered without a session existing.
+    assert response.status_code in (200, 422)
+    assert "session" not in response.text.lower()
 
 
 def test_the_documented_surface_is_present():

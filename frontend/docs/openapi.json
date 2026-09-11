@@ -856,6 +856,216 @@
         }
       }
     },
+    "/optimization/optimize": {
+      "post": {
+        "tags": [
+          "compute"
+        ],
+        "summary": "Run one portfolio optimizer",
+        "description": "Pure computation: the same request always produces the same response, and no session state is touched.\n\nAn optimizer that cannot answer raises rather than returning zeros \u2014 a silently flat weight vector looks like a deliberate decision to hold nothing.",
+        "operationId": "optimize_optimization_optimize_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OptimizeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OptimizeResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The engine refused, and says why.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/optimization/covariance": {
+      "post": {
+        "tags": [
+          "compute"
+        ],
+        "summary": "Estimate a covariance and correlation matrix",
+        "description": "Diagnostics travel with the matrix. When the estimator substitutes a simpler model \u2014 too few observations for the asset count \u2014 it says so, so a caller cannot use a degraded estimate believing it is a full one.",
+        "operationId": "covariance_optimization_covariance_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CovarianceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CovarianceResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The engine refused, and says why.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/analytics/rolling": {
+      "post": {
+        "tags": [
+          "compute"
+        ],
+        "summary": "Rolling volatility, Sharpe, VaR and CVaR",
+        "description": "Values before the window fills are `null`, never zero. A zero would draw a line through the origin that no data supports.",
+        "operationId": "rolling_analytics_rolling_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RollingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RollingResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The engine refused, and says why.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/analytics/attribution/factors": {
+      "post": {
+        "tags": [
+          "compute"
+        ],
+        "summary": "Split returns into beta and alpha contributions",
+        "description": "A mismatched benchmark is refused rather than truncated: pairing each return with the wrong observation produces a beta that means nothing.",
+        "operationId": "factors_analytics_attribution_factors_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FactorRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FactorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The engine refused, and says why.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/risk/validate": {
+      "post": {
+        "tags": [
+          "compute"
+        ],
+        "summary": "Semantic validation of a risk limit set",
+        "description": "Catches values that parse perfectly and are still wrong: a limit of zero rejects every order, and a limit of 1e9 can never bind while reading as protection on a control report.\n\nEvery issue is reported at once \u2014 an operator fixing a config should get one list, not six consecutive failed starts.",
+        "operationId": "validate_risk_risk_validate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RiskLimitsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The engine refused, and says why.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/": {
       "get": {
         "tags": [
@@ -1097,6 +1307,113 @@
           "count"
         ],
         "title": "ArtifactList"
+      },
+      "CovarianceRequest": {
+        "properties": {
+          "observations": {
+            "items": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "type": "array",
+            "title": "Observations",
+            "description": "Rows are observations, columns are assets. All rows equal length."
+          },
+          "method": {
+            "type": "string",
+            "enum": [
+              "sample",
+              "rolling",
+              "ewma",
+              "shrinkage",
+              "identity"
+            ],
+            "title": "Method",
+            "default": "shrinkage"
+          },
+          "window": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Window",
+            "default": 0
+          },
+          "shrinkage": {
+            "type": "number",
+            "title": "Shrinkage",
+            "description": "Negative selects the engine's automatic intensity.",
+            "default": -1.0
+          },
+          "min_observations_ratio": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Min Observations Ratio",
+            "description": "Observations per asset required before a full matrix is estimated. Lowering it disables a guard the engine applies deliberately.",
+            "default": 1.5
+          }
+        },
+        "type": "object",
+        "required": [
+          "observations"
+        ],
+        "title": "CovarianceRequest"
+      },
+      "CovarianceResponse": {
+        "properties": {
+          "covariance": {
+            "items": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "type": "array",
+            "title": "Covariance"
+          },
+          "correlation": {
+            "items": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "type": "array",
+            "title": "Correlation"
+          },
+          "observations": {
+            "type": "integer",
+            "title": "Observations"
+          },
+          "applied_shrinkage": {
+            "type": "number",
+            "title": "Applied Shrinkage"
+          },
+          "psd_repaired": {
+            "type": "boolean",
+            "title": "Psd Repaired"
+          },
+          "degraded": {
+            "type": "boolean",
+            "title": "Degraded"
+          },
+          "degradation_reason": {
+            "type": "string",
+            "title": "Degradation Reason",
+            "description": "Populated when the estimator substituted a simpler model. A caller must not use a degraded estimate without knowing it was degraded.",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "covariance",
+          "correlation",
+          "observations",
+          "applied_shrinkage",
+          "psd_repaired",
+          "degraded"
+        ],
+        "title": "CovarianceResponse"
       },
       "EngineSessionState": {
         "properties": {
@@ -1384,6 +1701,75 @@
           }
         ]
       },
+      "FactorRequest": {
+        "properties": {
+          "portfolio": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "minItems": 2,
+            "title": "Portfolio"
+          },
+          "benchmark": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "minItems": 2,
+            "title": "Benchmark"
+          }
+        },
+        "type": "object",
+        "required": [
+          "portfolio",
+          "benchmark"
+        ],
+        "title": "FactorRequest"
+      },
+      "FactorResponse": {
+        "properties": {
+          "beta": {
+            "type": "number",
+            "title": "Beta"
+          },
+          "beta_contribution": {
+            "type": "number",
+            "title": "Beta Contribution"
+          },
+          "alpha_contribution": {
+            "type": "number",
+            "title": "Alpha Contribution"
+          },
+          "residual_contribution": {
+            "type": "number",
+            "title": "Residual Contribution"
+          },
+          "portfolio_return": {
+            "type": "number",
+            "title": "Portfolio Return"
+          },
+          "benchmark_return": {
+            "type": "number",
+            "title": "Benchmark Return"
+          },
+          "periods": {
+            "type": "integer",
+            "title": "Periods"
+          }
+        },
+        "type": "object",
+        "required": [
+          "beta",
+          "beta_contribution",
+          "alpha_contribution",
+          "residual_contribution",
+          "portfolio_return",
+          "benchmark_return",
+          "periods"
+        ],
+        "title": "FactorResponse"
+      },
       "FillRecord": {
         "properties": {
           "ts": {
@@ -1632,6 +2018,194 @@
           }
         ]
       },
+      "OptimizeRequest": {
+        "properties": {
+          "optimizer": {
+            "type": "string",
+            "title": "Optimizer",
+            "description": "One of the names from GET /optimization."
+          },
+          "expected_returns": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Expected Returns",
+            "default": []
+          },
+          "volatilities": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Volatilities",
+            "default": []
+          },
+          "covariance": {
+            "items": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "type": "array",
+            "title": "Covariance",
+            "description": "Square matrix. Required by minimum_variance; others degrade gracefully.",
+            "default": []
+          },
+          "signals": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Signals",
+            "default": []
+          },
+          "symbols": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Symbols",
+            "description": "Echoed back alongside the weights, for labelling.",
+            "default": []
+          },
+          "max_position": {
+            "type": "number",
+            "maximum": 1.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Max Position",
+            "default": 0.2
+          },
+          "long_only": {
+            "type": "boolean",
+            "title": "Long Only",
+            "default": true
+          },
+          "max_gross_leverage": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Max Gross Leverage",
+            "default": 1.0
+          },
+          "risk_aversion": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Risk Aversion",
+            "default": 1.0
+          },
+          "target_volatility": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Target Volatility",
+            "default": 0.1
+          }
+        },
+        "type": "object",
+        "required": [
+          "optimizer"
+        ],
+        "title": "OptimizeRequest",
+        "examples": [
+          {
+            "max_position": 0.5,
+            "optimizer": "risk_parity",
+            "symbols": [
+              "AAA",
+              "BBB",
+              "CCC"
+            ],
+            "volatilities": [
+              0.12,
+              0.18,
+              0.09
+            ]
+          }
+        ]
+      },
+      "OptimizeResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "weights": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Weights"
+          },
+          "symbols": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Symbols"
+          },
+          "expected_return": {
+            "type": "number",
+            "title": "Expected Return"
+          },
+          "expected_volatility": {
+            "type": "number",
+            "title": "Expected Volatility"
+          },
+          "sharpe": {
+            "type": "number",
+            "title": "Sharpe"
+          },
+          "gross_exposure": {
+            "type": "number",
+            "title": "Gross Exposure"
+          },
+          "net_exposure": {
+            "type": "number",
+            "title": "Net Exposure"
+          },
+          "cash_weight": {
+            "type": "number",
+            "title": "Cash Weight"
+          },
+          "turnover": {
+            "type": "number",
+            "title": "Turnover"
+          },
+          "iterations": {
+            "type": "integer",
+            "title": "Iterations"
+          },
+          "binding_constraints": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Binding Constraints",
+            "description": "Constraints that bound the solution. A weight sitting exactly on a limit is a constrained answer, not a free one, and the difference matters when reading the result."
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "weights",
+          "symbols",
+          "expected_return",
+          "expected_volatility",
+          "sharpe",
+          "gross_exposure",
+          "net_exposure",
+          "cash_weight",
+          "turnover",
+          "iterations",
+          "binding_constraints",
+          "detail"
+        ],
+        "title": "OptimizeResponse"
+      },
       "OptimizerInfo": {
         "properties": {
           "name": {
@@ -1835,6 +2409,173 @@
           "note"
         ],
         "title": "RiskCapabilities"
+      },
+      "RiskLimitsRequest": {
+        "properties": {
+          "max_order_notional": {
+            "type": "number",
+            "title": "Max Order Notional",
+            "default": 1000000.0
+          },
+          "max_position_notional": {
+            "type": "number",
+            "title": "Max Position Notional",
+            "default": 1000000.0
+          },
+          "max_gross_leverage": {
+            "type": "number",
+            "title": "Max Gross Leverage",
+            "default": 1.0
+          },
+          "max_concentration": {
+            "type": "number",
+            "title": "Max Concentration",
+            "default": 0.1
+          },
+          "max_drawdown_pct": {
+            "type": "number",
+            "title": "Max Drawdown Pct",
+            "default": 0.2
+          },
+          "max_daily_turnover": {
+            "type": "number",
+            "title": "Max Daily Turnover",
+            "default": 10.0
+          },
+          "require_live": {
+            "type": "boolean",
+            "title": "Require Live",
+            "description": "Live sessions require limits a backtest may legitimately omit.",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "RiskLimitsRequest",
+        "examples": [
+          {
+            "max_concentration": 0.1,
+            "max_daily_turnover": 10.0,
+            "max_drawdown_pct": 0.2,
+            "max_gross_leverage": 1.0,
+            "max_order_notional": 1000000,
+            "max_position_notional": 1000000,
+            "require_live": false
+          }
+        ]
+      },
+      "RollingRequest": {
+        "properties": {
+          "returns": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Returns"
+          },
+          "window": {
+            "type": "integer",
+            "exclusiveMinimum": 1.0,
+            "title": "Window",
+            "default": 60
+          },
+          "periods_per_year": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Periods Per Year",
+            "default": 252.0
+          },
+          "var_confidence": {
+            "type": "number",
+            "exclusiveMaximum": 1.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Var Confidence",
+            "default": 0.05
+          }
+        },
+        "type": "object",
+        "required": [
+          "returns"
+        ],
+        "title": "RollingRequest"
+      },
+      "RollingResponse": {
+        "properties": {
+          "window": {
+            "type": "integer",
+            "title": "Window"
+          },
+          "omega": {
+            "type": "number",
+            "title": "Omega"
+          },
+          "volatility": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Volatility"
+          },
+          "sharpe": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Sharpe"
+          },
+          "var": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Var"
+          },
+          "cvar": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Cvar"
+          }
+        },
+        "type": "object",
+        "required": [
+          "window",
+          "omega",
+          "volatility",
+          "sharpe",
+          "var",
+          "cvar"
+        ],
+        "title": "RollingResponse"
       },
       "SessionActionResponse": {
         "properties": {
@@ -2089,6 +2830,72 @@
         ],
         "title": "ValidationError"
       },
+      "ValidationIssue": {
+        "properties": {
+          "severity": {
+            "type": "string",
+            "enum": [
+              "warning",
+              "fatal"
+            ],
+            "title": "Severity"
+          },
+          "field": {
+            "type": "string",
+            "title": "Field"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "remedy": {
+            "type": "string",
+            "title": "Remedy",
+            "description": "What a correct value looks like."
+          }
+        },
+        "type": "object",
+        "required": [
+          "severity",
+          "field",
+          "message",
+          "remedy"
+        ],
+        "title": "ValidationIssue"
+      },
+      "ValidationResponse": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok",
+            "description": "False when any issue is fatal."
+          },
+          "fatal": {
+            "type": "integer",
+            "title": "Fatal"
+          },
+          "warnings": {
+            "type": "integer",
+            "title": "Warnings"
+          },
+          "issues": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationIssue"
+            },
+            "type": "array",
+            "title": "Issues",
+            "description": "Every issue, not just the first: an operator should get one list."
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok",
+          "fatal",
+          "warnings",
+          "issues"
+        ],
+        "title": "ValidationResponse"
+      },
       "VersionInfo": {
         "properties": {
           "engine_version": {
@@ -2150,6 +2957,10 @@
     {
       "name": "artifacts",
       "description": "State a session previously persisted."
+    },
+    {
+      "name": "compute",
+      "description": "Stateless computation: optimization, covariance, analytics, risk validation. POST because the inputs are matrices, not because anything is mutated."
     },
     {
       "name": "session",

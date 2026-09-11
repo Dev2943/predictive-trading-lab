@@ -14,7 +14,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routers import artifacts, capabilities, session, system
+from .routers import artifacts, capabilities, compute, session, system
 
 app = FastAPI(
     title="Predictive Trading Lab API",
@@ -37,6 +37,14 @@ app = FastAPI(
         {
             "name": "artifacts",
             "description": "State a session previously persisted.",
+        },
+        {
+            "name": "compute",
+            "description": (
+                "Stateless computation: optimization, covariance, analytics, "
+                "risk validation. POST because the inputs are matrices, not "
+                "because anything is mutated."
+            ),
         },
         {
             "name": "session",
@@ -63,6 +71,7 @@ app.include_router(system.router)
 app.include_router(capabilities.router)
 app.include_router(artifacts.router)
 app.include_router(session.router)
+app.include_router(compute.router)
 
 
 @app.get("/", tags=["system"], summary="Service banner")
@@ -71,5 +80,5 @@ def root() -> dict[str, str]:
         "service": "predictive-trading-lab-api",
         "docs": "/docs",
         "openapi": "/openapi.json",
-        "phase": "F3 (session host)",
+        "phase": "F5 (computation)",
     }

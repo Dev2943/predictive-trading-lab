@@ -465,3 +465,179 @@ class SessionSnapshot(BaseModel):
     )
     instruments: list[Instrument] = []
     engine: EngineSessionState = Field(default_factory=EngineSessionState)
+
+
+# ---------------------------------------------------------------------------
+# Computation (F5)
+# ---------------------------------------------------------------------------
+#
+# These endpoints POST because their inputs are matrices, not because they
+# mutate anything. Optimization and analytics are pure functions: the same
+# request produces the same response and the engine holds no state across
+# calls. A test asserts the determinism fingerprints are unmoved by exercising
+# every one of them.
+
+
+class OptimizeRequest(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "optimizer": "risk_parity",
+                    "volatilities": [0.12, 0.18, 0.09],
+                    "symbols": ["AAA", "BBB", "CCC"],
+                    "max_position": 0.5,
+                }
+            ]
+        }
+    )
+
+    optimizer: str = Field(description="One of the names from GET /optimization.")
+    expected_returns: list[float] = []
+    volatilities: list[float] = []
+    covariance: list[list[float]] = Field(
+        default=[],
+        description="Square matrix. Required by minimum_variance; others degrade gracefully.",
+    )
+    signals: list[float] = []
+    symbols: list[str] = Field(
+        default=[], description="Echoed back alongside the weights, for labelling."
+    )
+    max_position: float = Field(default=0.20, gt=0, le=1.0)
+    long_only: bool = True
+    max_gross_leverage: float = Field(default=1.0, gt=0)
+    risk_aversion: float = Field(default=1.0, gt=0)
+    target_volatility: float = Field(default=0.10, gt=0)
+
+
+class OptimizeResponse(BaseModel):
+    status: str
+    weights: list[float]
+    symbols: list[str]
+    expected_return: float
+    expected_volatility: float
+    sharpe: float
+    gross_exposure: float
+    net_exposure: float
+    cash_weight: float
+    turnover: float
+    iterations: int
+    binding_constraints: list[str] = Field(
+        description=(
+            "Constraints that bound the solution. A weight sitting exactly on a "
+            "limit is a constrained answer, not a free one, and the difference "
+            "matters when reading the result."
+        )
+    )
+    detail: str
+
+
+class CovarianceRequest(BaseModel):
+    observations: list[list[float]] = Field(
+        description="Rows are observations, columns are assets. All rows equal length."
+    )
+    method: Literal["sample", "rolling", "ewma", "shrinkage", "identity"] = "shrinkage"
+    window: int = Field(default=0, ge=0)
+    shrinkage: float = Field(default=-1.0, description="Negative selects the engine's automatic intensity.")
+    min_observations_ratio: float = Field(
+        default=1.5,
+        ge=0.0,
+        description=(
+            "Observations per asset required before a full matrix is estimated. "
+            "Lowering it disables a guard the engine applies deliberately."
+        ),
+    )
+
+
+class CovarianceResponse(BaseModel):
+    covariance: list[list[float]]
+    correlation: list[list[float]]
+    observations: int
+    applied_shrinkage: float
+    psd_repaired: bool
+    degraded: bool
+    degradation_reason: str = Field(
+        default="",
+        description=(
+            "Populated when the estimator substituted a simpler model. A caller "
+            "must not use a degraded estimate without knowing it was degraded."
+        ),
+    )
+
+
+class RollingRequest(BaseModel):
+    returns: list[float] = Field(min_length=1)
+    window: int = Field(default=60, gt=1)
+    periods_per_year: float = Field(default=252.0, gt=0)
+    var_confidence: float = Field(default=0.05, gt=0, lt=1)
+
+
+class RollingResponse(BaseModel):
+    window: int
+    omega: float
+    # None before the window fills -- never zero, which would draw a line
+    # through the origin that no data supports.
+    volatility: list[float | None]
+    sharpe: list[float | None]
+    var: list[float | None]
+    cvar: list[float | None]
+
+
+class FactorRequest(BaseModel):
+    portfolio: list[float] = Field(min_length=2)
+    benchmark: list[float] = Field(min_length=2)
+
+
+class FactorResponse(BaseModel):
+    beta: float
+    beta_contribution: float
+    alpha_contribution: float
+    residual_contribution: float
+    portfolio_return: float
+    benchmark_return: float
+    periods: int
+
+
+class RiskLimitsRequest(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "max_order_notional": 1000000,
+                    "max_position_notional": 1000000,
+                    "max_gross_leverage": 1.0,
+                    "max_concentration": 0.1,
+                    "max_drawdown_pct": 0.2,
+                    "max_daily_turnover": 10.0,
+                    "require_live": False,
+                }
+            ]
+        }
+    )
+
+    max_order_notional: float = 1e6
+    max_position_notional: float = 1e6
+    max_gross_leverage: float = 1.0
+    max_concentration: float = 0.10
+    max_drawdown_pct: float = 0.20
+    max_daily_turnover: float = 10.0
+    require_live: bool = Field(
+        default=False,
+        description="Live sessions require limits a backtest may legitimately omit.",
+    )
+
+
+class ValidationIssue(BaseModel):
+    severity: Literal["warning", "fatal"]
+    field: str
+    message: str
+    remedy: str = Field(description="What a correct value looks like.")
+
+
+class ValidationResponse(BaseModel):
+    ok: bool = Field(description="False when any issue is fatal.")
+    fatal: int
+    warnings: int
+    issues: list[ValidationIssue] = Field(
+        description="Every issue, not just the first: an operator should get one list."
+    )
