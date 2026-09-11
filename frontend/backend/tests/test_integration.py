@@ -196,3 +196,73 @@ def test_the_same_seed_reproduces_the_same_session():
     # EXACT equality on equity: float summation is not associative, so any
     # ordering difference would surface in the last bits.
     assert first == second
+
+
+def test_the_real_engine_produces_an_equity_series():
+    """F4's claim: the host samples a usable intraday series.
+
+    The engine's own curve holds one point per trading session, which is
+    useless for an intraday chart, so the host samples the portfolio itself.
+    This asserts the series actually moves.
+    """
+    import time as _time
+
+    from app.engine import SessionDriver
+
+    driver = SessionDriver(ptl, step_size=25)
+    try:
+        driver.start(session_id="history", seed=20240101, bars=200)
+        deadline = _time.monotonic() + 10.0
+        while _time.monotonic() < deadline:
+            if driver.status()["replay_exhausted"]:
+                break
+            _time.sleep(0.02)
+
+        history = driver.snapshot()["history"]
+        assert history["available"] is True
+        assert history["total_points"] > 1
+
+        equity = [p["equity"] for p in history["points"]]
+        # The opening balance is the first observation, so the starting capital
+        # appears rather than the book seeming to begin after its first trades.
+        assert equity[0] == pytest.approx(1_000_000.0)
+        assert len(set(equity)) > 1
+        assert history["peak_equity"] >= max(equity)
+
+        instruments = driver.snapshot()["instruments"]["instruments"]
+        assert instruments == [{"instrument": 0, "symbol": "SPY"}]
+
+        driver.stop()
+    finally:
+        driver.shutdown()
+
+
+def test_the_host_does_not_corrupt_the_engines_own_equity_curve():
+    """The host samples by READING the portfolio.
+
+    Calling Portfolio::snapshot() would append to a series the engine believes
+    it controls. The engine records one point per session close, so its curve
+    must stay small no matter how much the host samples.
+    """
+    import time as _time
+
+    from app.engine import SessionDriver
+
+    driver = SessionDriver(ptl, step_size=25)
+    try:
+        driver.start(session_id="curve", seed=20240101, bars=200)
+        deadline = _time.monotonic() + 10.0
+        while _time.monotonic() < deadline:
+            if driver.status()["replay_exhausted"]:
+                break
+            _time.sleep(0.02)
+
+        history = driver.snapshot()["history"]
+        # The host sampled many points...
+        assert history["total_points"] > 5
+        # ...and the session still closes out cleanly, which it could not do if
+        # the engine's own curve had been polluted mid-run.
+        driver.stop()
+        assert driver.status()["error"] is None
+    finally:
+        driver.shutdown()

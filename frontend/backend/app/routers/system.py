@@ -1,10 +1,7 @@
 """Health, version, determinism and configuration."""
 
 from __future__ import annotations
-from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[4]
-DEFAULT_CONFIG = REPO_ROOT / "config" / "base.toml"
 from fastapi import APIRouter, HTTPException, Query, status
 
 from ..dependencies import Engine, MaybeEngine
@@ -77,7 +74,7 @@ def version(engine: Engine) -> VersionInfo:
 def fingerprints(
     engine: Engine,
     seed: int = Query(default=20240101, description="RNG seed to fingerprint."),
-    config_path: str = Query(default=str(DEFAULT_CONFIG)),
+    config_path: str = Query(default="config/base.toml"),
 ) -> Fingerprints:
     try:
         rng = engine.rng_fingerprint(seed, 3)
@@ -110,7 +107,7 @@ def system(engine: Engine) -> SystemInfo:
     prints: Fingerprints | None = None
     try:
         rng = engine.rng_fingerprint(20240101, 3)
-        config = engine.config_hash(str(DEFAULT_CONFIG))
+        config = engine.config_hash("config/base.toml")
         prints = Fingerprints(
             config_hash=config,
             rng=rng,
@@ -138,7 +135,7 @@ def system(engine: Engine) -> SystemInfo:
 )
 def config(
     engine: Engine,
-    path: str = Query(default=str(DEFAULT_CONFIG)),
+    path: str = Query(default="config/base.toml"),
 ) -> ArtifactEnvelope:
     try:
         digest = engine.config_hash(path)

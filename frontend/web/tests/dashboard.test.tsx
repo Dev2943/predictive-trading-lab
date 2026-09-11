@@ -207,3 +207,47 @@ describe("dashboard", () => {
     expect(await screen.findByText("unreachable")).toBeInTheDocument();
   });
 });
+
+describe("dashboard symbols", () => {
+  it("shows symbols rather than raw instrument ids", async () => {
+    // An id alone leaks an internal index at the user.
+    const snapshot = {
+      ...LIVE_SNAPSHOT,
+      positions: [{ instrument: 0, symbol: "SPY", quantity: 100, average_cost: 500.5, realized_pnl: 0 }],
+      fills: [
+        {
+          ts: "2024-07-02T14:31:00Z",
+          order_id: 6,
+          instrument: 0,
+          symbol: "SPY",
+          quantity: 25,
+          price: 500.25,
+          side: 1,
+          commission: 0.25,
+        },
+      ],
+      orders: [{ order_id: 7, instrument: 0, symbol: "SPY", side: 1, quantity: 25, filled: 0 }],
+      history: { available: false, total_points: 0, stride: 1, max_drawdown: 0, current_drawdown: 0, peak_equity: 0, points: [] },
+      instruments: [{ instrument: 0, symbol: "SPY" }],
+    };
+    vi.stubGlobal("fetch", stubFetch(RUNNING, snapshot));
+    renderDashboard();
+    await screen.findByText("RUNNING");
+    expect((await screen.findAllByText("SPY")).length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("falls back to the id if a symbol is missing", async () => {
+    // A blank cell would be worse than an ugly one.
+    const snapshot = {
+      ...LIVE_SNAPSHOT,
+      positions: [{ instrument: 4, symbol: null, quantity: 10, average_cost: 1, realized_pnl: 0 }],
+      orders: [],
+      fills: [],
+      history: { available: false, total_points: 0, stride: 1, max_drawdown: 0, current_drawdown: 0, peak_equity: 0, points: [] },
+      instruments: [],
+    };
+    vi.stubGlobal("fetch", stubFetch(RUNNING, snapshot));
+    renderDashboard();
+    expect(await screen.findByText("#4")).toBeInTheDocument();
+  });
+});

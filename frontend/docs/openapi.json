@@ -808,6 +808,54 @@
         }
       }
     },
+    "/session/history": {
+      "get": {
+        "tags": [
+          "session"
+        ],
+        "summary": "Sampled equity history and drawdown",
+        "description": "Served from the snapshot the driver published. The host samples the portfolio on the driver thread; a reader fetching history on demand would have to call into the session from a request thread and break the single-writer guarantee.\n\nDrawdown comes from the engine's own tracker. The gateway computes nothing.",
+        "operationId": "history_session_history_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EquityHistory"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/session/instruments": {
+      "get": {
+        "tags": [
+          "session"
+        ],
+        "summary": "Instruments this session trades",
+        "description": "Id to symbol. Only what the session actually trades: listing a wider universe would imply positions it cannot hold.",
+        "operationId": "instruments_session_instruments_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Instrument"
+                  },
+                  "type": "array",
+                  "title": "Response Instruments Session Instruments Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/": {
       "get": {
         "tags": [
@@ -1212,6 +1260,108 @@
         "title": "EngineSessionState",
         "description": "The host's own view. Every field optional: before the first start there\nis no session to describe, and inventing zeros would show a book that does\nnot exist."
       },
+      "EquityHistory": {
+        "properties": {
+          "available": {
+            "type": "boolean",
+            "title": "Available"
+          },
+          "total_points": {
+            "type": "integer",
+            "title": "Total Points",
+            "default": 0
+          },
+          "stride": {
+            "type": "integer",
+            "title": "Stride",
+            "description": "Points were downsampled by taking every nth. Stride rather than averaging: averaging smooths away the drawdown troughs a reader is looking for.",
+            "default": 1
+          },
+          "max_drawdown": {
+            "type": "number",
+            "title": "Max Drawdown",
+            "default": 0.0
+          },
+          "current_drawdown": {
+            "type": "number",
+            "title": "Current Drawdown",
+            "default": 0.0
+          },
+          "peak_equity": {
+            "type": "number",
+            "title": "Peak Equity",
+            "default": 0.0
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/EquityPoint"
+            },
+            "type": "array",
+            "title": "Points",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "available"
+        ],
+        "title": "EquityHistory",
+        "description": "Sampled equity history and drawdown.\n\nSampled by the session host on the driver thread and published with the\nsnapshot, so reading it never touches the session. Drawdown comes from the\nengine's own tracker -- the gateway computes nothing.",
+        "examples": [
+          {
+            "available": true,
+            "current_drawdown": 0.0,
+            "max_drawdown": 0.0042,
+            "peak_equity": 1000059.54,
+            "points": [],
+            "stride": 1,
+            "total_points": 120
+          }
+        ]
+      },
+      "EquityPoint": {
+        "properties": {
+          "ts": {
+            "type": "string",
+            "title": "Ts"
+          },
+          "equity": {
+            "type": "number",
+            "title": "Equity"
+          },
+          "cash": {
+            "type": "number",
+            "title": "Cash"
+          },
+          "realized_pnl": {
+            "type": "number",
+            "title": "Realized Pnl"
+          },
+          "unrealized_pnl": {
+            "type": "number",
+            "title": "Unrealized Pnl"
+          },
+          "gross_exposure": {
+            "type": "number",
+            "title": "Gross Exposure"
+          },
+          "net_exposure": {
+            "type": "number",
+            "title": "Net Exposure"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ts",
+          "equity",
+          "cash",
+          "realized_pnl",
+          "unrealized_pnl",
+          "gross_exposure",
+          "net_exposure"
+        ],
+        "title": "EquityPoint"
+      },
       "ErrorDetail": {
         "properties": {
           "detail": {
@@ -1247,6 +1397,17 @@
           "instrument": {
             "type": "integer",
             "title": "Instrument"
+          },
+          "symbol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Symbol"
           },
           "side": {
             "type": "integer",
@@ -1369,6 +1530,24 @@
           }
         ]
       },
+      "Instrument": {
+        "properties": {
+          "instrument": {
+            "type": "integer",
+            "title": "Instrument"
+          },
+          "symbol": {
+            "type": "string",
+            "title": "Symbol"
+          }
+        },
+        "type": "object",
+        "required": [
+          "instrument",
+          "symbol"
+        ],
+        "title": "Instrument"
+      },
       "OpenOrder": {
         "properties": {
           "order_id": {
@@ -1378,6 +1557,17 @@
           "instrument": {
             "type": "integer",
             "title": "Instrument"
+          },
+          "symbol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Symbol"
           },
           "side": {
             "type": "integer",
@@ -1531,6 +1721,18 @@
           "instrument": {
             "type": "integer",
             "title": "Instrument"
+          },
+          "symbol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Symbol",
+            "description": "Resolved by the host. An id alone leaks an internal index at the user."
           },
           "quantity": {
             "type": "number",
@@ -1701,6 +1903,18 @@
             "type": "array",
             "title": "Fills",
             "description": "Most recent first, bounded to the last 200.",
+            "default": []
+          },
+          "history": {
+            "$ref": "#/components/schemas/EquityHistory",
+            "description": "Equity series and drawdown, sampled by the host."
+          },
+          "instruments": {
+            "items": {
+              "$ref": "#/components/schemas/Instrument"
+            },
+            "type": "array",
+            "title": "Instruments",
             "default": []
           },
           "engine": {

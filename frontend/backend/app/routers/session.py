@@ -17,7 +17,9 @@ from fastapi import APIRouter, HTTPException, status
 from ..dependencies import Driver
 from ..engine import IllegalTransition
 from ..models.schemas import (
+    EquityHistory,
     ErrorDetail,
+    Instrument,
     SessionActionResponse,
     SessionSnapshot,
     SessionStatus,
@@ -161,6 +163,38 @@ def snapshot(driver: Driver) -> SessionSnapshot:
     return SessionSnapshot(state=driver.state.value, **_extract(driver.snapshot()))
 
 
+@router.get(
+    "/history",
+    response_model=EquityHistory,
+    summary="Sampled equity history and drawdown",
+    description=(
+        "Served from the snapshot the driver published. The host samples the "
+        "portfolio on the driver thread; a reader fetching history on demand "
+        "would have to call into the session from a request thread and break "
+        "the single-writer guarantee.\n\n"
+        "Drawdown comes from the engine's own tracker. The gateway computes "
+        "nothing."
+    ),
+)
+def history(driver: Driver) -> EquityHistory:
+    raw = driver.snapshot().get("history") or {"available": False}
+    return EquityHistory(**raw)
+
+
+@router.get(
+    "/instruments",
+    response_model=list[Instrument],
+    summary="Instruments this session trades",
+    description=(
+        "Id to symbol. Only what the session actually trades: listing a wider "
+        "universe would imply positions it cannot hold."
+    ),
+)
+def instruments(driver: Driver) -> list[Instrument]:
+    raw = driver.snapshot().get("instruments") or {}
+    return [Instrument(**i) for i in raw.get("instruments", [])]
+
+
 def _extract(snapshot: dict) -> dict:
     """Flatten the host document, tolerating a session that has not started.
 
@@ -174,5 +208,7 @@ def _extract(snapshot: dict) -> dict:
         "positions": snapshot.get("positions", {}).get("positions", []),
         "orders": snapshot.get("orders", {}).get("orders", []),
         "fills": snapshot.get("fills", {}).get("fills", []),
+        "history": snapshot.get("history") or {"available": False},
+        "instruments": (snapshot.get("instruments") or {}).get("instruments", []),
         "engine": snapshot.get("state", {}),
     }

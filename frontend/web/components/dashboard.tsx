@@ -1,7 +1,8 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, ApiError, type SessionSnapshot, type SessionStatus } from "@/lib/api";
+import { EquityChart } from "@/components/equity-chart";
+import { api, ApiError, type SessionStatus } from "@/lib/api";
 
 /**
  * The paper session dashboard.
@@ -182,26 +183,33 @@ export function Dashboard() {
         <Stat label="fills" value={String(engine.fills_received ?? "—")} />
       </section>
 
+      {/* --- charts ------------------------------------------------------- */}
+      <EquityChart history={snapshot.data?.history} />
+
       {/* --- tables ------------------------------------------------------- */}
       <div className="grid gap-6 lg:grid-cols-2">
         <Table
           title="Positions"
           empty="no open positions"
           rows={snapshot.data?.positions ?? []}
-          columns={["instrument", "quantity", "avg cost"]}
+          columns={["symbol", "quantity", "avg cost", "side"]}
           render={(p) => [
-            String(p.instrument),
+            // The symbol the host resolved. Falling back to the id keeps a row
+            // visible rather than blank if a symbol is ever missing.
+            p.symbol ?? `#${p.instrument}`,
             p.quantity.toFixed(2),
             money(p.average_cost),
+            p.quantity >= 0 ? "LONG" : "SHORT",
           ]}
         />
         <Table
           title="Open orders"
           empty="no working orders"
           rows={snapshot.data?.orders ?? []}
-          columns={["id", "side", "quantity", "filled"]}
+          columns={["id", "symbol", "side", "quantity", "filled"]}
           render={(o) => [
             String(o.order_id),
+            o.symbol ?? `#${o.instrument}`,
             o.side > 0 ? "BUY" : "SELL",
             o.quantity.toFixed(2),
             o.filled.toFixed(2),
@@ -213,10 +221,11 @@ export function Dashboard() {
         title="Latest fills"
         empty="no fills yet"
         rows={(snapshot.data?.fills ?? []).slice(0, 15)}
-        columns={["time", "id", "side", "quantity", "price"]}
+        columns={["time", "id", "symbol", "side", "quantity", "price"]}
         render={(f) => [
           f.ts.slice(11, 19),
           String(f.order_id),
+          f.symbol ?? `#${f.instrument}`,
           f.side > 0 ? "BUY" : "SELL",
           f.quantity.toFixed(2),
           f.price.toFixed(2),

@@ -240,6 +240,10 @@ class PortfolioResponse(BaseModel):
 
 class Position(BaseModel):
     instrument: int
+    symbol: str | None = Field(
+        default=None,
+        description="Resolved by the host. An id alone leaks an internal index at the user.",
+    )
     quantity: float
     average_cost: float | None = None
     realized_pnl: float | None = None
@@ -367,9 +371,65 @@ class SessionActionResponse(BaseModel):
     state: str
 
 
+class Instrument(BaseModel):
+    instrument: int
+    symbol: str
+
+
+class EquityPoint(BaseModel):
+    ts: str
+    equity: float
+    cash: float
+    realized_pnl: float
+    unrealized_pnl: float
+    gross_exposure: float
+    net_exposure: float
+
+
+class EquityHistory(BaseModel):
+    """Sampled equity history and drawdown.
+
+    Sampled by the session host on the driver thread and published with the
+    snapshot, so reading it never touches the session. Drawdown comes from the
+    engine's own tracker -- the gateway computes nothing.
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "available": True,
+                    "total_points": 120,
+                    "stride": 1,
+                    "max_drawdown": 0.0042,
+                    "current_drawdown": 0.0,
+                    "peak_equity": 1000059.54,
+                    "points": [],
+                }
+            ]
+        }
+    )
+
+    available: bool
+    total_points: int = 0
+    stride: int = Field(
+        default=1,
+        description=(
+            "Points were downsampled by taking every nth. Stride rather than "
+            "averaging: averaging smooths away the drawdown troughs a reader "
+            "is looking for."
+        ),
+    )
+    max_drawdown: float = 0.0
+    current_drawdown: float = 0.0
+    peak_equity: float = 0.0
+    points: list[EquityPoint] = []
+
+
 class OpenOrder(BaseModel):
     order_id: int
     instrument: int
+    symbol: str | None = None
     side: int = Field(description="1 for buy, -1 for sell.")
     quantity: float
     filled: float
@@ -379,6 +439,7 @@ class FillRecord(BaseModel):
     ts: str
     order_id: int
     instrument: int
+    symbol: str | None = None
     side: int
     quantity: float
     price: float
@@ -398,4 +459,9 @@ class SessionSnapshot(BaseModel):
     fills: list[FillRecord] = Field(
         default=[], description="Most recent first, bounded to the last 200."
     )
+    history: EquityHistory = Field(
+        default_factory=lambda: EquityHistory(available=False),
+        description="Equity series and drawdown, sampled by the host.",
+    )
+    instruments: list[Instrument] = []
     engine: EngineSessionState = Field(default_factory=EngineSessionState)

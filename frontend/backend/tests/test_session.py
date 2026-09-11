@@ -271,3 +271,107 @@ def test_the_session_host_is_unavailable_without_bindings():
     with TestClient(app) as test_client:
         assert test_client.get("/session").status_code == 503
     app.dependency_overrides.clear()
+
+
+# ---------------------------------------------------------------------------
+# F4: history, drawdown and instruments
+# ---------------------------------------------------------------------------
+
+
+class HistoryBackend(FakeBackend):
+    """A backend that publishes a growing equity series."""
+
+    def __init__(self, points: int = 5, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self._points = points
+
+    def session_snapshot(self) -> str:
+        base = json.loads(super().session_snapshot())
+        equity = [1000.0, 1010.0, 1005.0, 1020.0, 1015.0][: self._points]
+        peak = max(equity) if equity else 0.0
+        base["history"] = {
+            "available": self.started,
+            "total_points": len(equity),
+            "stride": 1,
+            "max_drawdown": 0.0049,
+            "current_drawdown": 0.0049,
+            "peak_equity": peak,
+            "points": [
+                {
+                    "ts": f"2024-07-02T14:{30 + i:02d}:00Z",
+                    "equity": e,
+                    "cash": e,
+                    "realized_pnl": 0.0,
+                    "unrealized_pnl": 0.0,
+                    "gross_exposure": 0.0,
+                    "net_exposure": 0.0,
+                }
+                for i, e in enumerate(equity)
+            ],
+        }
+        base["instruments"] = {"instruments": [{"instrument": 0, "symbol": "SPY"}]}
+        return json.dumps(base)
+
+
+@pytest.fixture
+def history_client():
+    driver = SessionDriver(HistoryBackend(), step_size=25)
+    app.dependency_overrides[get_driver] = lambda: driver
+    with TestClient(app) as client:
+        yield client
+    app.dependency_overrides.clear()
+    driver.shutdown()
+
+
+def test_history_is_absent_before_a_session_starts(history_client):
+    """Absent, not a flat line at zero. A chart must be able to tell the
+    difference between no data and a book worth nothing."""
+    body = history_client.get("/session/history").json()
+    assert body["available"] is False
+    assert body["points"] == []
+
+
+def test_history_is_served_once_running(history_client):
+    history_client.post("/session/start", json={})
+    body = history_client.get("/session/history").json()
+    assert body["available"] is True
+    assert len(body["points"]) == 5
+    assert body["points"][0]["equity"] == 1000.0
+    # Drawdown comes from the engine; the gateway computes nothing.
+    assert body["max_drawdown"] == pytest.approx(0.0049)
+    assert body["peak_equity"] == 1020.0
+
+
+def test_history_is_included_in_the_snapshot(history_client):
+    """One consistent read: history must come from the same instant as the
+    account, not from a second call that could land between steps."""
+    history_client.post("/session/start", json={})
+    snapshot = history_client.get("/session/snapshot").json()
+    assert snapshot["history"]["available"] is True
+    assert len(snapshot["history"]["points"]) == 5
+    assert snapshot["instruments"] == [{"instrument": 0, "symbol": "SPY"}]
+
+
+def test_instruments_resolve_to_symbols(history_client):
+    history_client.post("/session/start", json={})
+    body = history_client.get("/session/instruments").json()
+    assert body == [{"instrument": 0, "symbol": "SPY"}]
+
+
+def test_history_endpoints_do_not_touch_the_session(history_client):
+    """Reads are served from the published snapshot.
+
+    The backend counts every call it receives; reading history repeatedly must
+    not add any.
+    """
+    history_client.post("/session/start", json={})
+    driver = app.dependency_overrides[get_driver]()
+    backend = driver._backend  # noqa: SLF001
+    before = backend.steps
+
+    for _ in range(5):
+        history_client.get("/session/history")
+        history_client.get("/session/instruments")
+
+    # Any change is the driver thread stepping, never a reader.
+    assert backend.start_calls == 1

@@ -12,10 +12,16 @@
 #include "ptl/paper/account.hpp"
 #include "ptl/paper/broker.hpp"
 #include "ptl/portfolio/portfolio.hpp"
+#include "ptl/analytics/drawdown.hpp"
+#include "ptl/core/instrument_table.hpp"
 #include "ptl/risk/risk_manager.hpp"
 
 namespace ptl_host {
 namespace {
+
+/// Cap on retained samples. A few hundred points is more than any chart
+/// renders, and the bound is what keeps a long session from growing forever.
+constexpr std::size_t kMaxHistory = 2000;
 
 [[nodiscard]] ptl::Error bad(std::string message) {
     return ptl::make_error(ptl::ErrorCode::ValidationFailed, std::move(message));
@@ -168,6 +174,25 @@ struct PaperSessionHost::Impl {
     ptl::risk::RiskManager                         risk;
     ptl::accounting::Journal                       journal;
     ptl::storage::ArtifactStore                    artifacts;
+    /// Owned here so the host can resolve ids to symbols. The engine takes
+    /// instrument ids; only the presentation boundary needs names.
+    ptl::InstrumentTable                           instruments;
+
+    /// Host-sampled equity history.
+    ///
+    /// BOUNDED. A session left running for days would otherwise grow without
+    /// limit, and no chart renders more than a few hundred points anyway.
+    struct Sample {
+        ptl::Timestamp ts{ptl::kNoTimestamp};
+        double equity = 0.0;
+        double cash = 0.0;
+        double realized_pnl = 0.0;
+        double unrealized_pnl = 0.0;
+        double gross_exposure = 0.0;
+        double net_exposure = 0.0;
+    };
+    std::deque<Sample> history;
+    std::size_t        events_at_last_sample = 0;
     HostStrategy                                   strategy;
     std::unique_ptr<ptl::paper::PaperAccount>      account;
     std::unique_ptr<ptl::paper::PaperBroker>       broker;
@@ -178,7 +203,10 @@ struct PaperSessionHost::Impl {
         : calendar(std::move(cal)),
           portfolio(portfolio_config),
           risk(limits),
-          artifacts(std::move(artifact_root)) {}
+          artifacts(std::move(artifact_root)) {
+        // Instrument 0 is the single synthetic instrument this session trades.
+        (void)instruments.intern("SPY");
+    }
 };
 
 PaperSessionHost::PaperSessionHost() = default;
@@ -304,6 +332,10 @@ ptl::Result<bool> PaperSessionHost::start(const StartOptions& options) {
 
     impl_ = std::move(impl);
     state_ = HostState::Running;
+    // The opening balance is a real observation: without it a chart's first
+    // point is the equity after the first trades, and the starting capital
+    // never appears.
+    record_sample();
     return true;
 }
 
@@ -347,6 +379,11 @@ ptl::Result<std::size_t> PaperSessionHost::step(std::size_t max_events) {
         last_error_ = processed.error().message;
         return ptl::fail(processed.error());
     }
+
+    // Sampled only when the book actually moved. Recording an identical point
+    // on every idle poll would fill the series with duplicates and make a
+    // stalled session look busy.
+    if (*processed > 0) record_sample();
     return *processed;
 }
 
@@ -400,8 +437,9 @@ std::string PaperSessionHost::positions_json() const {
         if (position.is_flat()) continue;
         if (!first) ss << ", ";
         first = false;
-        ss << "{\"instrument\": " << key
-           << ", \"quantity\": " << num(position.quantity().get())
+        ss << "{\"instrument\": " << key << ", \"symbol\": \""
+           << escape(impl_->instruments.symbol(static_cast<ptl::InstrumentId>(key)))
+           << "\", \"quantity\": " << num(position.quantity().get())
            << ", \"average_cost\": " << num(position.average_cost().get())
            << ", \"realized_pnl\": " << num(position.realized_pnl().get()) << '}';
     }
@@ -422,6 +460,8 @@ std::string PaperSessionHost::orders_json() const {
         first = false;
         ss << "{\"order_id\": " << ptl::oms::value_of(id)
            << ", \"instrument\": " << ptl::index_of(record->order.instrument())
+           << ", \"symbol\": \""
+           << escape(impl_->instruments.symbol(record->order.instrument())) << '"' 
            << ", \"side\": " << (record->order.side() == ptl::Side::Buy ? 1 : -1)
            << ", \"quantity\": " << num(record->order.quantity().get())
            << ", \"filled\": " << num(record->filled_quantity.get()) << '}';
@@ -444,10 +484,101 @@ std::string PaperSessionHost::fills_json() const {
         first = false;
         ss << "{\"ts\": \"" << iso_or_empty(it->ts) << "\", \"order_id\": "
            << it->order_id << ", \"instrument\": " << it->instrument
+           << ", \"symbol\": \""
+           << escape(impl_->instruments.symbol(
+                  static_cast<ptl::InstrumentId>(it->instrument)))
+           << '"' 
            << ", \"side\": " << it->side << ", \"quantity\": " << num(it->quantity)
            << ", \"price\": " << num(it->price)
            << ", \"commission\": " << num(it->commission) << '}';
     }
+    ss << "]}";
+    return ss.str();
+}
+
+std::string PaperSessionHost::instruments_json() const {
+    if (!impl_) return R"({"instruments": []})";
+
+    std::ostringstream ss;
+    ss << "{\"instruments\": [";
+    // Only the instruments this session actually uses. Listing a global
+    // universe would imply the session trades things it does not.
+    const auto symbol = impl_->instruments.symbol(kInstrument);
+    ss << "{\"instrument\": " << ptl::index_of(kInstrument) << ", \"symbol\": \""
+       << escape(symbol) << "\"}";
+    ss << "]}";
+    return ss.str();
+}
+
+void PaperSessionHost::record_sample() {
+    if (!impl_ || !impl_->session) return;
+
+    Impl::Sample sample;
+    sample.ts = impl_->clock.now();
+    // READ ONLY. Portfolio::snapshot() would append to the engine's own curve,
+    // a series the engine believes it controls.
+    sample.equity = impl_->portfolio.equity().get();
+    sample.cash = impl_->portfolio.cash().get();
+    sample.realized_pnl = impl_->portfolio.realized_pnl().get();
+    sample.unrealized_pnl = impl_->portfolio.unrealized_pnl().get();
+    sample.gross_exposure = impl_->portfolio.gross_exposure().get();
+    sample.net_exposure = impl_->portfolio.net_exposure().get();
+
+    impl_->history.push_back(sample);
+    if (impl_->history.size() > kMaxHistory) impl_->history.pop_front();
+}
+
+std::string PaperSessionHost::history_json(std::size_t max_points) const {
+    if (!impl_) return R"({"available": false, "points": []})";
+
+    const auto& curve = impl_->history;
+    if (curve.empty()) {
+        // A session that has started but processed no events has no history.
+        // Reported as empty rather than as a single point at zero, which a
+        // chart would draw as a real observation.
+        return R"({"available": true, "points": [], "max_drawdown": 0.0, "current_drawdown": 0.0})";
+    }
+
+    // Drawdown from the ENGINE's tracker, fed the same curve. Recomputing it
+    // here would be a second definition that could disagree with the risk
+    // engine that halts on it.
+    ptl::analytics::DrawdownTracker drawdown;
+    for (const auto& point : curve) {
+        (void)drawdown.update(point.ts, ptl::Notional{point.equity});
+    }
+
+    // STRIDE, not averaging. An averaged equity curve smooths away the
+    // drawdown troughs, which are the points a reader is looking for.
+    const std::size_t stride =
+        (max_points == 0 || curve.size() <= max_points)
+            ? 1
+            : (curve.size() + max_points - 1) / max_points;
+
+    std::ostringstream ss;
+    ss << "{\"available\": true, \"total_points\": " << curve.size()
+       << ", \"stride\": " << stride
+       << ", \"max_drawdown\": " << num(drawdown.max_drawdown())
+       << ", \"current_drawdown\": " << num(drawdown.current_drawdown())
+       << ", \"peak_equity\": " << num(drawdown.peak_equity().get())
+       << ", \"points\": [";
+
+    bool first = true;
+    const auto emit = [&](const Impl::Sample& point) {
+        if (!first) ss << ", ";
+        first = false;
+        ss << "{\"ts\": \"" << iso_or_empty(point.ts) << "\", \"equity\": "
+           << num(point.equity) << ", \"cash\": " << num(point.cash)
+           << ", \"realized_pnl\": " << num(point.realized_pnl)
+           << ", \"unrealized_pnl\": " << num(point.unrealized_pnl)
+           << ", \"gross_exposure\": " << num(point.gross_exposure)
+           << ", \"net_exposure\": " << num(point.net_exposure) << '}';
+    };
+
+    for (std::size_t i = 0; i < curve.size(); i += stride) emit(curve[i]);
+    // The final point is always kept, so the series ends where the data does
+    // rather than up to stride-1 observations short of it.
+    if ((curve.size() - 1) % stride != 0) emit(curve.back());
+
     ss << "]}";
     return ss.str();
 }
@@ -457,9 +588,16 @@ std::string PaperSessionHost::snapshot_json() const {
     // read. Assembling it from four separate calls would let the account and
     // the positions come from different instants.
     std::ostringstream ss;
+    // History is INCLUDED here rather than offered as a separate call.
+    //
+    // A reader fetching history on demand would have to call into the session
+    // from a request thread, which breaks the single-writer guarantee. Instead
+    // the driver publishes it with everything else, so every reader sees one
+    // consistent instant and none of them touches the engine.
     ss << "{\"state\": " << state_json() << ", \"portfolio\": " << portfolio_json()
        << ", \"positions\": " << positions_json() << ", \"orders\": " << orders_json()
-       << ", \"fills\": " << fills_json() << '}';
+       << ", \"fills\": " << fills_json() << ", \"history\": " << history_json(240)
+       << ", \"instruments\": " << instruments_json() << '}';
     return ss.str();
 }
 

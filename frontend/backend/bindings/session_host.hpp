@@ -114,6 +114,35 @@ public:
     [[nodiscard]] std::string positions_json() const;
     [[nodiscard]] std::string portfolio_json() const;
 
+    /// Equity history and drawdown, downsampled to at most `max_points`.
+    ///
+    /// WHY THE HOST SAMPLES RATHER THAN READING THE ENGINE'S CURVE.
+    ///
+    /// `Portfolio` keeps an equity curve, but `Engine` only appends to it when
+    /// `snapshot_on_bar` is set, and `PaperSession` constructs its Engine
+    /// without exposing that flag. Over a single trading day the engine's curve
+    /// therefore holds exactly one point -- useless for an intraday chart.
+    ///
+    /// So the host samples the portfolio itself, on the driver thread, between
+    /// steps. It READS equity, cash and exposure; it never calls
+    /// `Portfolio::snapshot()`, which would append to the engine's own curve
+    /// and corrupt a series the engine believes it owns.
+    ///
+    /// Drawdown comes from the engine's DrawdownTracker fed from those samples,
+    /// not from arithmetic here. A second definition of drawdown is how a chart
+    /// comes to disagree with the risk engine that halts on it.
+    [[nodiscard]] std::string history_json(std::size_t max_points) const;
+
+    /// Instrument id to symbol. Ids are an internal index; a UI that showed
+    /// "instrument 0" would be leaking an implementation detail at the user.
+    [[nodiscard]] std::string instruments_json() const;
+
+    /// Sample the portfolio into the history buffer.
+    ///
+    /// Called by step() on the driver thread. Not public API: a reader calling
+    /// it would touch the session from a request thread.
+    void record_sample();
+
 private:
     struct Impl;
 

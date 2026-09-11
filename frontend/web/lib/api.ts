@@ -95,8 +95,34 @@ export interface AccountSummary {
   status: string | null;
 }
 
+export interface Instrument {
+  instrument: number;
+  symbol: string;
+}
+
+export interface EquityPoint {
+  ts: string;
+  equity: number;
+  cash: number;
+  realized_pnl: number;
+  unrealized_pnl: number;
+  gross_exposure: number;
+  net_exposure: number;
+}
+
+export interface EquityHistory {
+  available: boolean;
+  total_points: number;
+  stride: number;
+  max_drawdown: number;
+  current_drawdown: number;
+  peak_equity: number;
+  points: EquityPoint[];
+}
+
 export interface Position {
   instrument: number;
+  symbol: string | null;
   quantity: number;
   average_cost: number | null;
   realized_pnl: number | null;
@@ -105,6 +131,7 @@ export interface Position {
 export interface OpenOrder {
   order_id: number;
   instrument: number;
+  symbol: string | null;
   side: number;
   quantity: number;
   filled: number;
@@ -114,6 +141,7 @@ export interface Fill {
   ts: string;
   order_id: number;
   instrument: number;
+  symbol: string | null;
   side: number;
   quantity: number;
   price: number;
@@ -127,6 +155,8 @@ export interface SessionSnapshot {
   positions: Position[];
   orders: OpenOrder[];
   fills: Fill[];
+  history: EquityHistory;
+  instruments: Instrument[];
   engine: SessionStatus["engine"];
 }
 
@@ -145,6 +175,8 @@ export const api = {
   system: () => request<SystemInfo>("/system"),
 
   session: () => request<SessionStatus>("/session"),
+  history: () => request<EquityHistory>("/session/history"),
+  instruments: () => request<Instrument[]>("/session/instruments"),
   /** One consistent read: account, positions, orders and fills at one instant. */
   snapshot: () => request<SessionSnapshot>("/session/snapshot"),
 
