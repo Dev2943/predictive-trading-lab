@@ -52,6 +52,7 @@ class EngineClient(Protocol):
     def optimize(self, **kwargs: Any) -> dict[str, Any]: ...
     def estimate_covariance(self, **kwargs: Any) -> dict[str, Any]: ...
     def rolling_metrics(self, **kwargs: Any) -> dict[str, Any]: ...
+    def performance_metrics(self, **kwargs: Any) -> dict[str, Any]: ...
     def factor_contribution(
         self, portfolio: list[float], benchmark: list[float]
     ) -> dict[str, Any]: ...
@@ -107,6 +108,9 @@ class InProcessEngineClient:
 
     def rolling_metrics(self, **kwargs: Any) -> dict[str, Any]:
         return dict(self._call(self._ptl.rolling_metrics, **kwargs))
+
+    def performance_metrics(self, **kwargs: Any) -> dict[str, Any]:
+        return dict(self._call(self._ptl.performance_metrics, **kwargs))
 
     def factor_contribution(
         self, portfolio: list[float], benchmark: list[float]

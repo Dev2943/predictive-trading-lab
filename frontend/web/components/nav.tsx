@@ -16,6 +16,7 @@ const LINKS = [
   { href: "/optimization", label: "Optimization" },
   { href: "/market", label: "Market" },
   { href: "/analytics", label: "Analytics" },
+  { href: "/research", label: "Research" },
   { href: "/risk", label: "Risk" },
 ];
 

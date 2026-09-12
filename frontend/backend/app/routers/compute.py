@@ -35,6 +35,8 @@ from ..models.schemas import (
     FactorResponse,
     OptimizeRequest,
     OptimizeResponse,
+    PerformanceMetrics,
+    PerformanceRequest,
     RiskLimitsRequest,
     RollingRequest,
     RollingResponse,
@@ -182,3 +184,31 @@ def validate_risk(
     except EngineError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return ValidationResponse(**result)
+
+
+@router.post(
+    "/analytics/performance",
+    response_model=PerformanceMetrics,
+    responses=_REFUSED,
+    summary="Full performance metrics for an equity series",
+    description=(
+        "Computed by the engine's `MetricsEngine` — cumulative and annualised "
+        "return, CAGR, volatility, downside volatility, Sharpe, Sortino, "
+        "Calmar, maximum drawdown and its duration, skewness, best and worst "
+        "period.\n\n"
+        "Takes equity **levels**, not returns: the engine derives returns per "
+        "its configured basis so the basis is decided once.\n\n"
+        "Trade-derived fields (win rate, profit factor, expectancy) are zero "
+        "here. An equity series cannot distinguish a round trip from a mark, "
+        "and the engine reports zero rather than inferring trades that were "
+        "never supplied."
+    ),
+)
+def performance(request: PerformanceRequest, engine: Engine) -> PerformanceMetrics:
+    try:
+        result = engine.performance_metrics(
+            equity=request.equity, periods_per_year=request.periods_per_year
+        )
+    except EngineError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return PerformanceMetrics(**result)

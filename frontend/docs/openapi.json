@@ -1066,6 +1066,48 @@
         }
       }
     },
+    "/analytics/performance": {
+      "post": {
+        "tags": [
+          "compute"
+        ],
+        "summary": "Full performance metrics for an equity series",
+        "description": "Computed by the engine's `MetricsEngine` \u2014 cumulative and annualised return, CAGR, volatility, downside volatility, Sharpe, Sortino, Calmar, maximum drawdown and its duration, skewness, best and worst period.\n\nTakes equity **levels**, not returns: the engine derives returns per its configured basis so the basis is decided once.\n\nTrade-derived fields (win rate, profit factor, expectancy) are zero here. An equity series cannot distinguish a round trip from a mark, and the engine reports zero rather than inferring trades that were never supplied.",
+        "operationId": "performance_analytics_performance_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PerformanceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PerformanceMetrics"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The engine refused, and says why.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/trading/mode": {
       "get": {
         "tags": [
@@ -2993,6 +3035,177 @@
           "pending"
         ],
         "title": "PendingOrders"
+      },
+      "PerformanceMetrics": {
+        "properties": {
+          "periods": {
+            "type": "integer",
+            "title": "Periods"
+          },
+          "initial_equity": {
+            "type": "number",
+            "title": "Initial Equity"
+          },
+          "final_equity": {
+            "type": "number",
+            "title": "Final Equity"
+          },
+          "cumulative_return": {
+            "type": "number",
+            "title": "Cumulative Return"
+          },
+          "annualized_return": {
+            "type": "number",
+            "title": "Annualized Return"
+          },
+          "cagr": {
+            "type": "number",
+            "title": "Cagr"
+          },
+          "annualized_volatility": {
+            "type": "number",
+            "title": "Annualized Volatility"
+          },
+          "downside_volatility": {
+            "type": "number",
+            "title": "Downside Volatility"
+          },
+          "sharpe": {
+            "type": "number",
+            "title": "Sharpe"
+          },
+          "sortino": {
+            "type": "number",
+            "title": "Sortino"
+          },
+          "calmar": {
+            "type": "number",
+            "title": "Calmar"
+          },
+          "max_drawdown": {
+            "type": "number",
+            "title": "Max Drawdown"
+          },
+          "max_drawdown_periods": {
+            "type": "integer",
+            "title": "Max Drawdown Periods"
+          },
+          "skewness": {
+            "type": "number",
+            "title": "Skewness"
+          },
+          "worst_period": {
+            "type": "number",
+            "title": "Worst Period"
+          },
+          "best_period": {
+            "type": "number",
+            "title": "Best Period"
+          },
+          "trades": {
+            "type": "integer",
+            "title": "Trades"
+          },
+          "wins": {
+            "type": "integer",
+            "title": "Wins"
+          },
+          "losses": {
+            "type": "integer",
+            "title": "Losses"
+          },
+          "win_rate": {
+            "type": "number",
+            "title": "Win Rate"
+          },
+          "average_win": {
+            "type": "number",
+            "title": "Average Win"
+          },
+          "average_loss": {
+            "type": "number",
+            "title": "Average Loss"
+          },
+          "win_loss_ratio": {
+            "type": "number",
+            "title": "Win Loss Ratio"
+          },
+          "profit_factor": {
+            "type": "number",
+            "title": "Profit Factor"
+          },
+          "expectancy": {
+            "type": "number",
+            "title": "Expectancy"
+          }
+        },
+        "type": "object",
+        "required": [
+          "periods",
+          "initial_equity",
+          "final_equity",
+          "cumulative_return",
+          "annualized_return",
+          "cagr",
+          "annualized_volatility",
+          "downside_volatility",
+          "sharpe",
+          "sortino",
+          "calmar",
+          "max_drawdown",
+          "max_drawdown_periods",
+          "skewness",
+          "worst_period",
+          "best_period",
+          "trades",
+          "wins",
+          "losses",
+          "win_rate",
+          "average_win",
+          "average_loss",
+          "win_loss_ratio",
+          "profit_factor",
+          "expectancy"
+        ],
+        "title": "PerformanceMetrics",
+        "description": "Every field the engine's MetricsEngine produces.\n\nExposed, not recomputed. A second definition of Sharpe is how two reports\nof the same run come to disagree.",
+        "examples": [
+          {
+            "annualized_return": 0.1016,
+            "annualized_volatility": 0.0451,
+            "calmar": 7.0586,
+            "cumulative_return": 0.106,
+            "max_drawdown": 0.0225,
+            "max_drawdown_periods": 10,
+            "periods": 251,
+            "sharpe": 2.2545,
+            "sortino": 3.6468
+          }
+        ]
+      },
+      "PerformanceRequest": {
+        "properties": {
+          "equity": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "minItems": 2,
+            "title": "Equity"
+          },
+          "periods_per_year": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Periods Per Year",
+            "default": 252.0
+          }
+        },
+        "type": "object",
+        "required": [
+          "equity"
+        ],
+        "title": "PerformanceRequest",
+        "description": "An equity series, not returns.\n\nThe engine derives period returns per its configured basis, so the basis\nlives in one place rather than being decided twice."
       },
       "PortfolioResponse": {
         "properties": {

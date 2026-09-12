@@ -348,6 +348,34 @@ export function marketStreamUrl(): string {
   return `${BASE.replace(/^http/, "ws")}/market/stream`;
 }
 
+export interface PerformanceMetrics {
+  periods: number;
+  initial_equity: number;
+  final_equity: number;
+  cumulative_return: number;
+  annualized_return: number;
+  cagr: number;
+  annualized_volatility: number;
+  downside_volatility: number;
+  sharpe: number;
+  sortino: number;
+  calmar: number;
+  max_drawdown: number;
+  max_drawdown_periods: number;
+  skewness: number;
+  worst_period: number;
+  best_period: number;
+  trades: number;
+  wins: number;
+  losses: number;
+  win_rate: number;
+  average_win: number;
+  average_loss: number;
+  win_loss_ratio: number;
+  profit_factor: number;
+  expectancy: number;
+}
+
 export const api = {
   /** One request for a status header, rather than three. */
   system: () => request<SystemInfo>("/system"),
@@ -382,6 +410,11 @@ export const api = {
     request<BulkActionResponse>("/trading/cancel-all", { method: "POST" }),
   flatten: () => request<BulkActionResponse>("/trading/flatten", { method: "POST" }),
 
+  performance: (equity: number[]) =>
+    request<PerformanceMetrics>("/analytics/performance", {
+      method: "POST",
+      body: JSON.stringify({ equity }),
+    }),
   rolling: (returns: number[], window: number) =>
     request<RollingResponse>("/analytics/rolling", {
       method: "POST",

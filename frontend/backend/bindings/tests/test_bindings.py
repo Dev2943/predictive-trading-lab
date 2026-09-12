@@ -88,6 +88,9 @@ def test_only_the_intended_surface_is_exposed():
         "factor_contribution",
         "optimize",
         "optimizer_names",
+        # P10. Exposes MetricsEngine, which the engine has computed since
+        # Phase 10 and which had no way out of it.
+        "performance_metrics",
         "rng_fingerprint",
         "rolling_metrics",
         "validate_risk_limits",

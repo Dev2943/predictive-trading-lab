@@ -35,7 +35,9 @@
 #include <string>
 #include <vector>
 
+#include "ptl/analytics/metrics.hpp"
 #include "ptl/analytics/rolling.hpp"
+#include "ptl/portfolio/portfolio.hpp"
 #include "ptl/attribution/pnl.hpp"
 #include "ptl/config/config.hpp"
 #include "ptl/core/clock.hpp"
@@ -342,6 +344,88 @@ template <typename T>
 }
 
 // ---------------------------------------------------------------------------
+// Performance metrics
+// ---------------------------------------------------------------------------
+
+/// Full performance metrics from an equity series.
+///
+/// EXPOSES, DOES NOT COMPUTE. `analytics::MetricsEngine` already produces every
+/// field below -- Sharpe, Sortino, Calmar, profit factor, expectancy, skewness
+/// and the rest. They were computed by the engine from the first phase and had
+/// no way out of it.
+///
+/// Re-deriving any of them in Python or TypeScript would create a second
+/// definition that could disagree with the risk engine and the reports, which
+/// is the failure this whole layering exists to prevent.
+///
+/// The caller supplies equity LEVELS, not returns: the engine derives period
+/// returns itself, per its configured basis, so the basis lives in one place.
+[[nodiscard]] py::dict performance_metrics(const std::vector<double>& equity,
+                                           double periods_per_year) {
+    if (equity.size() < 2) {
+        throw std::runtime_error(
+            "performance metrics need at least two equity observations");
+    }
+
+    // The engine's curve type. Timestamps are synthesised at a daily cadence
+    // because the caller supplies levels without dates; only the ORDER matters
+    // to the metrics, and drawdown durations are reported in periods.
+    ptl::Timestamp t{};
+    (void)ptl::parse_timestamp("2020-01-01T00:00:00Z", t);
+
+    std::vector<ptl::portfolio::EquityPoint> curve;
+    curve.reserve(equity.size());
+    for (const double level : equity) {
+        if (!ptl::is_finite(level)) {
+            throw std::runtime_error("equity series contains a non-finite value");
+        }
+        ptl::portfolio::EquityPoint point;
+        point.ts = t;
+        point.equity = ptl::Notional{level};
+        curve.push_back(point);
+        t += std::chrono::hours{24};
+    }
+
+    ptl::analytics::MetricsConfig config;
+    config.periods_per_year = periods_per_year;
+    const ptl::analytics::MetricsEngine engine{config};
+
+    // No trades supplied: trade-derived fields (win rate, profit factor,
+    // expectancy) are reported as the engine leaves them rather than
+    // fabricated from the equity series, which cannot distinguish a round trip
+    // from a mark.
+    const auto metrics = engine.compute(curve, {});
+
+    py::dict out;
+    out["periods"] = metrics.periods;
+    out["initial_equity"] = metrics.initial_equity.get();
+    out["final_equity"] = metrics.final_equity.get();
+    out["cumulative_return"] = metrics.cumulative_return;
+    out["annualized_return"] = metrics.annualized_return;
+    out["cagr"] = metrics.cagr;
+    out["annualized_volatility"] = metrics.annualized_volatility;
+    out["downside_volatility"] = metrics.downside_volatility;
+    out["sharpe"] = metrics.sharpe;
+    out["sortino"] = metrics.sortino;
+    out["calmar"] = metrics.calmar;
+    out["max_drawdown"] = metrics.max_drawdown;
+    out["max_drawdown_periods"] = metrics.max_drawdown_periods;
+    out["trades"] = metrics.trades;
+    out["wins"] = metrics.wins;
+    out["losses"] = metrics.losses;
+    out["win_rate"] = metrics.win_rate;
+    out["average_win"] = metrics.average_win.get();
+    out["average_loss"] = metrics.average_loss.get();
+    out["win_loss_ratio"] = metrics.win_loss_ratio;
+    out["profit_factor"] = metrics.profit_factor;
+    out["expectancy"] = metrics.expectancy.get();
+    out["skewness"] = metrics.skewness;
+    out["worst_period"] = metrics.worst_period;
+    out["best_period"] = metrics.best_period;
+    return out;
+}
+
+// ---------------------------------------------------------------------------
 // Attribution
 // ---------------------------------------------------------------------------
 
@@ -499,6 +583,12 @@ PYBIND11_MODULE(ptl, m) {
           py::arg("var_confidence") = 0.05,
           "Rolling volatility, Sharpe, VaR and CVaR. Values before the window\n"
           "is full are None, never zero.");
+
+    m.def("performance_metrics", &performance_metrics, py::arg("equity"),
+          py::arg("periods_per_year") = 252.0,
+          "Full performance metrics from an equity series, computed by the "
+          "engine's MetricsEngine. Takes levels, not returns: the engine "
+          "derives returns per its configured basis.");
 
     m.def("factor_contribution", &factor_contribution, py::arg("portfolio"),
           py::arg("benchmark"), "Split returns into beta and alpha contributions.");

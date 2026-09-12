@@ -270,3 +270,99 @@ def test_computation_does_not_perturb_determinism(client, monkeypatch, observati
     client.post("/risk/validate", json={})
 
     assert client.get("/fingerprints").json() == before
+
+
+# ---------------------------------------------------------------------------
+# P10: performance metrics
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def rising_equity():
+    """A series with a real drawdown, so the drawdown fields are exercised."""
+    equity = [100_000.0]
+    for i in range(250):
+        equity.append(equity[-1] * (1 + math.sin(i * 0.3) * 0.004 + 0.0004))
+    return equity
+
+
+def test_performance_metrics_come_from_the_engine(client, rising_equity):
+    body = client.post(
+        "/analytics/performance", json={"equity": rising_equity}
+    ).json()
+
+    # `periods` counts equity observations, not returns.
+    assert body["periods"] == len(rising_equity)
+    assert body["cumulative_return"] > 0
+    assert body["annualized_volatility"] > 0
+    assert body["max_drawdown"] > 0
+    assert body["max_drawdown_periods"] > 0
+    # Sortino uses downside deviation only, so it exceeds Sharpe on a series
+    # whose losses are smaller than its total variability.
+    assert body["sortino"] > body["sharpe"]
+
+
+def test_cumulative_return_matches_the_series(client, rising_equity):
+    """A cross-check against the input, so a wrong field mapping is caught."""
+    body = client.post("/analytics/performance", json={"equity": rising_equity}).json()
+    expected = rising_equity[-1] / rising_equity[0] - 1
+    assert body["cumulative_return"] == pytest.approx(expected, rel=1e-9)
+    assert body["initial_equity"] == pytest.approx(rising_equity[0])
+    assert body["final_equity"] == pytest.approx(rising_equity[-1])
+
+
+def test_trade_fields_are_zero_without_trades(client, rising_equity):
+    """An equity series cannot distinguish a round trip from a mark.
+
+    The engine reports zero rather than inferring trades, and the UI says so
+    rather than presenting the zeros as results.
+    """
+    body = client.post("/analytics/performance", json={"equity": rising_equity}).json()
+    assert body["trades"] == 0
+    assert body["win_rate"] == 0.0
+    assert body["profit_factor"] == 0.0
+
+
+def test_a_single_observation_is_refused(client):
+    """One point is not a series; a metric derived from it would be fiction."""
+    assert client.post("/analytics/performance", json={"equity": [100.0]}).status_code == 422
+
+
+def test_a_non_finite_equity_value_is_refused_at_the_binding():
+    """JSON cannot carry an infinity, so HTTP can never deliver one.
+
+    The guard still matters: a programmatic caller using the bindings directly
+    can, and a NaN in an equity series would silently poison every statistic
+    derived from it.
+    """
+    with pytest.raises(RuntimeError, match="non-finite"):
+        ptl.performance_metrics([100.0, float("nan"), 101.0])
+
+
+def test_a_flat_series_has_no_drawdown_and_no_return(client):
+    body = client.post(
+        "/analytics/performance", json={"equity": [100.0] * 50}
+    ).json()
+    assert body["cumulative_return"] == pytest.approx(0.0)
+    assert body["max_drawdown"] == pytest.approx(0.0)
+    # Volatility of a constant series is zero, and Sharpe must not be an
+    # infinity dressed up as a number.
+    assert body["annualized_volatility"] == pytest.approx(0.0)
+    assert math.isfinite(body["sharpe"])
+
+
+def test_performance_is_deterministic(client, rising_equity):
+    payload = {"equity": rising_equity}
+    assert (
+        client.post("/analytics/performance", json=payload).json()
+        == client.post("/analytics/performance", json=payload).json()
+    )
+
+
+def test_performance_does_not_perturb_determinism(client, monkeypatch, rising_equity):
+    import pathlib
+
+    monkeypatch.chdir(pathlib.Path(__file__).resolve().parents[3])
+    before = client.get("/fingerprints").json()
+    client.post("/analytics/performance", json={"equity": rising_equity})
+    assert client.get("/fingerprints").json() == before

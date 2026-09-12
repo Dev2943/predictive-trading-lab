@@ -46,6 +46,8 @@ COMPUTE_POSTS = {
     "/analytics/rolling",
     "/analytics/attribution/factors",
     "/risk/validate",
+    # P10. Exposes the engine's MetricsEngine; stateless like its neighbours.
+    "/analytics/performance",
 }
 # F6. Trading commands mutate session state, but only by enqueuing onto the
 # driver -- never by touching the engine from a request thread.

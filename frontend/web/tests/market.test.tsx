@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import MarketPage from "@/app/market/page";
+import type { MarketQuote, MarketStatus } from "@/lib/api";
 
 /**
  * Market page tests.
@@ -13,7 +14,7 @@ import MarketPage from "@/app/market/page";
  * the source honestly, show absence as absence, and report a dropped stream.
  */
 
-const STATUS = {
+const STATUS: MarketStatus = {
   mode: "replay",
   connected: true,
   provider: "synthetic-replay",
@@ -22,7 +23,7 @@ const STATUS = {
   last_update: null,
 };
 
-const QUOTES = [
+const QUOTES: MarketQuote[] = [
   {
     symbol: "SPY",
     bid: 503.11,
@@ -57,7 +58,7 @@ class FakeSocket {
   }
 }
 
-function stubFetch(status = STATUS, quotes = QUOTES) {
+function stubFetch(status: MarketStatus = STATUS, quotes: MarketQuote[] = QUOTES) {
   return vi.fn(async (url: string, init?: RequestInit) => {
     if (init?.method === "POST") {
       return new Response(JSON.stringify(status), { status: 200 });
@@ -108,7 +109,7 @@ describe("market page", () => {
     await waitFor(() => expect(FakeSocket.last).not.toBeNull());
     FakeSocket.last!.push({
       status: STATUS,
-      quotes: [{ ...QUOTES[0], bid: 504.01, ask: 504.03 }],
+      quotes: [{ ...QUOTES[0]!, bid: 504.01, ask: 504.03 }],
     });
     expect(await screen.findByText("504.01")).toBeInTheDocument();
   });
@@ -124,7 +125,7 @@ describe("market page", () => {
 
   it("shows an absent bid as a dash, not zero", async () => {
     // A missing bid and a bid of zero are different observations.
-    const silent = [{ ...QUOTES[0], bid: null, ask: null, spread_value: null, spread_bps: null }];
+    const silent: MarketQuote[] = [{ ...QUOTES[0]!, bid: null, ask: null, spread_value: null, spread_bps: null }];
     vi.stubGlobal("fetch", stubFetch(STATUS, silent));
     renderPage();
     await screen.findByText("SPY");

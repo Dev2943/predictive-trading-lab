@@ -746,3 +746,74 @@ class HaltResponse(BaseModel):
         default="",
         description="What remains active while halted, so the control is not mistaken for a stop.",
     )
+
+
+# ---------------------------------------------------------------------------
+# Performance metrics (P10)
+# ---------------------------------------------------------------------------
+
+
+class PerformanceRequest(BaseModel):
+    """An equity series, not returns.
+
+    The engine derives period returns per its configured basis, so the basis
+    lives in one place rather than being decided twice.
+    """
+
+    equity: list[float] = Field(min_length=2)
+    periods_per_year: float = Field(default=252.0, gt=0)
+
+
+class PerformanceMetrics(BaseModel):
+    """Every field the engine's MetricsEngine produces.
+
+    Exposed, not recomputed. A second definition of Sharpe is how two reports
+    of the same run come to disagree.
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "periods": 251,
+                    "cumulative_return": 0.106,
+                    "annualized_return": 0.1016,
+                    "annualized_volatility": 0.0451,
+                    "sharpe": 2.2545,
+                    "sortino": 3.6468,
+                    "calmar": 7.0586,
+                    "max_drawdown": 0.0225,
+                    "max_drawdown_periods": 10,
+                }
+            ]
+        }
+    )
+
+    periods: int
+    initial_equity: float
+    final_equity: float
+    cumulative_return: float
+    annualized_return: float
+    cagr: float
+    annualized_volatility: float
+    downside_volatility: float
+    sharpe: float
+    sortino: float
+    calmar: float
+    max_drawdown: float
+    max_drawdown_periods: int
+    skewness: float
+    worst_period: float
+    best_period: float
+    # Trade-derived. Zero when no trades were supplied -- the equity series
+    # alone cannot distinguish a round trip from a mark, and the engine does not
+    # guess.
+    trades: int
+    wins: int
+    losses: int
+    win_rate: float
+    average_win: float
+    average_loss: float
+    win_loss_ratio: float
+    profit_factor: float
+    expectancy: float
