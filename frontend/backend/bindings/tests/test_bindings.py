@@ -69,7 +69,13 @@ def test_sessions_are_not_reachable_from_python():
 
     # F3 added a session host, and it is reachable only through free functions
     # returning JSON. No bound class means no handle to engine state.
-    for name in ("session_start", "session_stop", "session_state"):
+    for name in (
+        "session_start",
+        "session_stop",
+        "session_state",
+        "session_submit_order",
+        "session_cancel_order",
+    ):
         assert callable(getattr(ptl, name))
         assert not isinstance(getattr(ptl, name), type)
 
@@ -92,6 +98,13 @@ def test_only_the_intended_surface_is_exposed():
         "session_state",
         "session_step",
         "session_stop",
+        # F6 order entry. Still functions taking plain data: a manual order
+        # becomes an oms::Order only inside the engine, where the risk gate
+        # sees it exactly as it sees a strategy's own.
+        "session_cancel_all",
+        "session_cancel_order",
+        "session_flatten",
+        "session_submit_order",
     }
 
 

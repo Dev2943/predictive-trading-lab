@@ -47,6 +47,10 @@ COMPUTE_POSTS = {
     "/analytics/attribution/factors",
     "/risk/validate",
 }
+# F6. Trading commands mutate session state, but only by enqueuing onto the
+# driver -- never by touching the engine from a request thread.
+TRADING_POSTS = {"/trading/orders", "/trading/cancel-all", "/trading/flatten"}
+TRADING_DELETES = {"/trading/orders/{order_id}"}
 
 
 def test_post_endpoints_are_either_lifecycle_or_stateless_computation():
@@ -63,18 +67,25 @@ def test_post_endpoints_are_either_lifecycle_or_stateless_computation():
     """
     schema = app.openapi()
     posts = {path for path, operations in schema["paths"].items() if "post" in operations}
-    assert posts == LIFECYCLE_POSTS | COMPUTE_POSTS
+    assert posts == LIFECYCLE_POSTS | COMPUTE_POSTS | TRADING_POSTS
 
-    # Nothing else, anywhere.
+    deletes = {
+        path for path, operations in schema["paths"].items() if "delete" in operations
+    }
+    # DELETE exists for exactly one path: cancelling a working order. It is
+    # listed explicitly so a second one cannot appear unnoticed.
+    assert deletes == TRADING_DELETES
+
     verbs = {verb for operations in schema["paths"].values() for verb in operations}
-    assert verbs <= {"get", "post"}
+    assert verbs <= {"get", "post", "delete"}
+    assert "put" not in verbs and "patch" not in verbs
 
     for path, operations in schema["paths"].items():
-        if path not in posts:
+        if path not in posts | deletes:
             assert set(operations) == {"get"}, f"{path} exposes a non-GET verb"
 
     # The surface is real, so the assertions above are not vacuous.
-    assert len(schema["paths"]) >= 25
+    assert len(schema["paths"]) >= 30
 
 
 def test_compute_endpoints_do_not_touch_the_session(client):

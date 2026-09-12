@@ -64,6 +64,21 @@ enum class HostState : std::uint8_t {
 
 [[nodiscard]] std::string_view to_string(HostState) noexcept;
 
+/// A manually entered order, awaiting submission.
+///
+/// NOT an oms::Order. It is untrusted input until the strategy builds a real
+/// order from it inside the engine's dispatch, where the risk gate and OMS see
+/// it exactly as they see a strategy's own order.
+struct ManualOrder {
+    std::string symbol;
+    int         side = 1;  ///< 1 buy, -1 sell
+    double      quantity = 0.0;
+    std::string type = "market";  ///< market | limit | stop | stop_limit
+    double      limit_price = 0.0;
+    double      stop_price = 0.0;
+    std::string time_in_force = "day";
+};
+
 struct StartOptions {
     std::string   session_id = "paper";
     std::uint64_t seed = 20240101;
@@ -136,6 +151,40 @@ public:
     /// Instrument id to symbol. Ids are an internal index; a UI that showed
     /// "instrument 0" would be leaking an implementation detail at the user.
     [[nodiscard]] std::string instruments_json() const;
+
+    /// Queue a manually entered order.
+    ///
+    /// QUEUED, NOT SUBMITTED. The only route to the venue is OrderSink, and the
+    /// engine hands that to the strategy inside on_bar and nowhere else. So a
+    /// manual order waits in an inbox and the host's strategy drains it at the
+    /// next event, submitting through the same sink it uses for its own orders.
+    ///
+    /// The alternative was calling risk, OMS and the broker directly from here,
+    /// which would duplicate the engine's submission sequence -- and a second
+    /// copy of that sequence is one that can disagree about whether an order
+    /// passed the risk gate.
+    ///
+    /// A queued order also models reality: an order entered between events
+    /// reaches the venue at the next one, never instantaneously.
+    [[nodiscard]] ptl::Result<std::uint64_t> enqueue_order(const ManualOrder&);
+
+    /// Queue a cancel for a working order.
+    [[nodiscard]] ptl::Result<bool> enqueue_cancel(std::uint64_t order_id);
+
+    /// Queue cancels for every working order.
+    [[nodiscard]] ptl::Result<std::size_t> enqueue_cancel_all();
+
+    /// Queue market orders closing every open position.
+    ///
+    /// Paper only, and enforced here rather than in the UI: a control that
+    /// liquidates a book must not depend on a button being disabled.
+    [[nodiscard]] ptl::Result<std::size_t> enqueue_flatten();
+
+    /// Every order this session has seen, with its current OMS state.
+    [[nodiscard]] std::string order_history_json() const;
+
+    /// Pending manual requests not yet submitted.
+    [[nodiscard]] std::string pending_json() const;
 
     /// Sample the portfolio into the history buffer.
     ///

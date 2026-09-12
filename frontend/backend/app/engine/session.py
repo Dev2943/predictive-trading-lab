@@ -98,6 +98,10 @@ class SessionBackend(Protocol):
     def session_step(self, max_events: int) -> int: ...
     def session_state(self) -> str: ...
     def session_snapshot(self) -> str: ...
+    def session_submit_order(self, **kwargs: Any) -> int: ...
+    def session_cancel_order(self, order_id: int) -> bool: ...
+    def session_cancel_all(self) -> int: ...
+    def session_flatten(self) -> int: ...
 
 
 @dataclass
@@ -106,6 +110,7 @@ class _Command:
     kwargs: dict[str, Any] = field(default_factory=dict)
     done: threading.Event = field(default_factory=threading.Event)
     error: str | None = None
+    result: Any = None
 
 
 class SessionDriver:
@@ -167,13 +172,61 @@ class SessionDriver:
             self._await_state(SessionState.STOPPED)
         self.start(**kwargs)
 
+    # --- trading commands --------------------------------------------------
+    #
+    # Same queue, same single writer. An order entered here is applied by the
+    # driver between steps and reaches the engine at the next event, exactly as
+    # a lifecycle command does. A request handler never touches the session.
+
+    def submit_order(self, **kwargs: Any) -> int:
+        self._require_running("submit an order")
+        command = _Command("submit_order", kwargs)
+        self._submit(command)
+        return int(command.result or 0)
+
+    def cancel_order(self, order_id: int) -> None:
+        self._require_running("cancel an order")
+        self._submit(_Command("cancel_order", {"order_id": order_id}))
+
+    def cancel_all(self) -> int:
+        self._require_running("cancel orders")
+        command = _Command("cancel_all")
+        self._submit(command)
+        return int(command.result or 0)
+
+    def flatten(self) -> int:
+        self._require_running("flatten")
+        command = _Command("flatten")
+        self._submit(command)
+        return int(command.result or 0)
+
+    def _require_running(self, verb: str) -> None:
+        """Trading commands need a RUNNING session.
+
+        Raised as IllegalTransition so routes answer 409 -- the request was
+        well-formed and refused for when it arrived, which is the same shape as
+        a double start.
+        """
+        if self._state is not SessionState.RUNNING:
+            raise IllegalTransition(self._state, verb)
+
     def shutdown(self) -> None:
-        """Stop the driver thread. For process teardown and tests."""
-        if self._state is SessionState.RUNNING:
+        """Stop the driver thread. For process teardown and tests.
+
+        Stops from ERROR as well as RUNNING. The C++ host is one instance per
+        process, so a driver that gave up here would leave a session behind and
+        the next start would be refused -- a failure in one place surfacing as a
+        confusing error somewhere unrelated.
+        """
+        if self._state in (SessionState.RUNNING, SessionState.ERROR):
             try:
+                if self._state is SessionState.ERROR:
+                    # ERROR -> STOPPED is legal; force the transition so the
+                    # underlying host is released.
+                    self._state = SessionState.RUNNING
                 self.stop()
                 self._await_state(SessionState.STOPPED, timeout=5.0)
-            except IllegalTransition:
+            except (IllegalTransition, RuntimeError):
                 pass
         self._stop_thread.set()
         if self._thread is not None:
@@ -230,8 +283,19 @@ class SessionDriver:
                 self._apply(command)
             except Exception as exc:  # noqa: BLE001 - reported, never swallowed
                 command.error = str(exc)
-                self._state = SessionState.ERROR
-                self._error = str(exc)
+                # A FAILED TRADING COMMAND IS NOT A FAILED SESSION.
+                #
+                # An unknown symbol or a bad quantity is the caller's mistake,
+                # and the session is still perfectly healthy. Driving it to
+                # ERROR would let one mistyped order halt trading and force a
+                # restart -- and it would leave the book unattended for a reason
+                # that had nothing to do with the book.
+                #
+                # Lifecycle failures are different: if start or stop failed, the
+                # session really is in an unknown state.
+                if command.name in ("start", "stop"):
+                    self._state = SessionState.ERROR
+                    self._error = str(exc)
             finally:
                 command.done.set()
 
@@ -248,6 +312,14 @@ class SessionDriver:
             self._backend.session_stop()
             self._state = SessionState.STOPPED
             self._publish()
+        elif command.name == "submit_order":
+            command.result = self._backend.session_submit_order(**command.kwargs)
+        elif command.name == "cancel_order":
+            self._backend.session_cancel_order(command.kwargs["order_id"])
+        elif command.name == "cancel_all":
+            command.result = self._backend.session_cancel_all()
+        elif command.name == "flatten":
+            command.result = self._backend.session_flatten()
         else:  # pragma: no cover - unreachable by construction
             raise RuntimeError(f"unknown command '{command.name}'")
 

@@ -111,6 +111,11 @@ public:
     void on_bar(const ptl::market::Bar& bar,
                 const ptl::engine::StrategyContext& ctx,
                 ptl::engine::OrderSink& sink) override {
+        // MANUAL REQUESTS FIRST, through the same sink the strategy uses. The
+        // risk gate and OMS cannot tell a manual order from an automatic one,
+        // which is the point: there is one submission path, not two.
+        drain(bar, sink);
+
         ++bars_;
         if (bars_ % 15 != 0) return;
 
@@ -125,7 +130,9 @@ public:
         auto order = ptl::oms::Order::market(sink.next_order_id(), bar.instrument(),
                                              side, ptl::Qty{25.0}, times);
         if (!order) return;
-        (void)sink.submit(order->with_arrival_price(bar.close()));
+        if (auto submitted = sink.submit(order->with_arrival_price(bar.close()))) {
+            submitted_.push_back(ptl::oms::value_of(*submitted));
+        }
     }
 
     void on_fill(const ptl::oms::Fill& fill,
@@ -149,8 +156,127 @@ public:
         return fills_;
     }
 
+    /// Requests waiting to be drained into the engine at the next event.
+    struct Request {
+        std::uint64_t         request_id = 0;
+        bool                  is_cancel = false;
+        std::uint64_t         cancel_target = 0;
+        ptl::InstrumentId     instrument{0};
+        ptl::Side             side{ptl::Side::Buy};
+        ptl::Qty              quantity{};
+        ptl::oms::OrderType   type{ptl::oms::OrderType::Market};
+        ptl::Price            limit_price{};
+        ptl::Price            stop_price{};
+        ptl::oms::TimeInForce tif{ptl::oms::TimeInForce::Day};
+    };
+
+    void enqueue(Request request) { inbox_.push_back(std::move(request)); }
+    [[nodiscard]] std::size_t pending() const noexcept { return inbox_.size(); }
+
+    /// Order ids this session has submitted, manual and automatic alike, in
+    /// submission order. The OMS exposes only working orders, so a terminal
+    /// order would otherwise vanish from the blotter the moment it filled.
+    [[nodiscard]] const std::vector<std::uint64_t>& submitted() const noexcept {
+        return submitted_;
+    }
+
+    /// Outcome of a manual request, so the UI can report a rejection against
+    /// the request the user made rather than silently dropping it.
+    struct Outcome {
+        std::uint64_t request_id = 0;
+        std::uint64_t order_id = 0;
+        bool          accepted = false;
+        std::string   detail;
+    };
+    [[nodiscard]] const std::deque<Outcome>& outcomes() const noexcept {
+        return outcomes_;
+    }
+
+    void drain(const ptl::market::Bar& bar, ptl::engine::OrderSink& sink) {
+        while (!inbox_.empty()) {
+            const Request request = inbox_.front();
+            inbox_.pop_front();
+
+            Outcome outcome;
+            outcome.request_id = request.request_id;
+
+            if (request.is_cancel) {
+                auto cancelled =
+                    sink.cancel(static_cast<ptl::oms::OrderId>(request.cancel_target));
+                outcome.accepted = cancelled.has_value();
+                outcome.order_id = request.cancel_target;
+                if (!cancelled) outcome.detail = cancelled.error().message;
+                record(std::move(outcome));
+                continue;
+            }
+
+            ptl::LifecycleTimes times;
+            // From the EVENT. A manual order is decided when the user pressed
+            // the button, but it is DECIDED FOR THE ENGINE at the bar it
+            // reaches; using a wall clock here would break the timestamp chain.
+            times.decision_time = bar.close_time();
+
+            const auto id = sink.next_order_id();
+            ptl::Result<ptl::oms::Order> built =
+                ptl::fail(ptl::make_error(ptl::ErrorCode::ValidationFailed,
+                                          "unsupported order type"));
+
+            switch (request.type) {
+                case ptl::oms::OrderType::Market:
+                    built = ptl::oms::Order::market(id, request.instrument, request.side,
+                                                    request.quantity, times, request.tif);
+                    break;
+                case ptl::oms::OrderType::Limit:
+                    built = ptl::oms::Order::limit(id, request.instrument, request.side,
+                                                   request.quantity, request.limit_price,
+                                                   times, request.tif);
+                    break;
+                case ptl::oms::OrderType::Stop:
+                    built = ptl::oms::Order::stop(id, request.instrument, request.side,
+                                                  request.quantity, request.stop_price,
+                                                  times, request.tif);
+                    break;
+                case ptl::oms::OrderType::StopLimit:
+                    built = ptl::oms::Order::stop_limit(
+                        id, request.instrument, request.side, request.quantity,
+                        request.stop_price, request.limit_price, times, request.tif);
+                    break;
+            }
+
+            if (!built) {
+                outcome.detail = built.error().message;
+                record(std::move(outcome));
+                continue;
+            }
+
+            auto submitted = sink.submit(built->with_arrival_price(bar.close()));
+            if (!submitted) {
+                // A risk rejection is reported against the request the user
+                // made. Dropping it silently would leave them believing the
+                // order is live.
+                outcome.detail = submitted.error().message;
+                record(std::move(outcome));
+                continue;
+            }
+
+            outcome.accepted = true;
+            outcome.order_id = ptl::oms::value_of(*submitted);
+            submitted_.push_back(outcome.order_id);
+            record(std::move(outcome));
+        }
+    }
+
+    void record(Outcome outcome) {
+        outcomes_.push_back(std::move(outcome));
+        if (outcomes_.size() > kMaxOutcomes) outcomes_.pop_front();
+    }
+
 private:
     static constexpr std::size_t kMaxFills = 200;
+    static constexpr std::size_t kMaxOutcomes = 200;
+    std::deque<Request>          inbox_;
+    std::vector<std::uint64_t>   submitted_;
+    std::deque<Outcome>          outcomes_;
     std::size_t                  bars_ = 0;
     std::deque<FillRecord>       fills_;
 };
@@ -193,6 +319,9 @@ struct PaperSessionHost::Impl {
     };
     std::deque<Sample> history;
     std::size_t        events_at_last_sample = 0;
+    /// Monotonic request ids, so a caller can match an outcome to the request
+    /// it made. Per-session, not global: two sessions must not share a counter.
+    std::uint64_t next_request_id = 1;
     HostStrategy                                   strategy;
     std::unique_ptr<ptl::paper::PaperAccount>      account;
     std::unique_ptr<ptl::paper::PaperBroker>       broker;
@@ -510,6 +639,176 @@ std::string PaperSessionHost::instruments_json() const {
     return ss.str();
 }
 
+namespace {
+
+[[nodiscard]] ptl::Result<ptl::oms::OrderType> parse_type(const std::string& text) {
+    if (text == "market") return ptl::oms::OrderType::Market;
+    if (text == "limit") return ptl::oms::OrderType::Limit;
+    if (text == "stop") return ptl::oms::OrderType::Stop;
+    if (text == "stop_limit") return ptl::oms::OrderType::StopLimit;
+    return ptl::fail(bad("unknown order type: " + text));
+}
+
+[[nodiscard]] ptl::Result<ptl::oms::TimeInForce> parse_tif(const std::string& text) {
+    if (text == "day") return ptl::oms::TimeInForce::Day;
+    if (text == "ioc") return ptl::oms::TimeInForce::ImmediateOrCancel;
+    if (text == "fok") return ptl::oms::TimeInForce::FillOrKill;
+    if (text == "gtc") return ptl::oms::TimeInForce::GoodTillCancel;
+    return ptl::fail(bad("unknown time in force: " + text));
+}
+
+}  // namespace
+
+ptl::Result<std::uint64_t> PaperSessionHost::enqueue_order(const ManualOrder& request) {
+    if (state_ != HostState::Running || !impl_) {
+        return ptl::fail(bad("no running session to accept an order"));
+    }
+
+    const auto instrument = impl_->instruments.find(request.symbol);
+    if (!instrument) {
+        // REFUSED, never guessed. Interning an unknown symbol would create an
+        // instrument the session has no data for, and the order would rest
+        // forever against a book that never ticks.
+        return ptl::fail(bad("unknown symbol: " + request.symbol));
+    }
+    if (!(request.quantity > 0.0) || !ptl::is_finite(request.quantity)) {
+        return ptl::fail(bad("quantity must be positive"));
+    }
+
+    auto type = parse_type(request.type);
+    if (!type) return ptl::fail(type.error());
+    auto tif = parse_tif(request.time_in_force);
+    if (!tif) return ptl::fail(tif.error());
+
+    // Prices are validated HERE, before queuing. A limit order with no limit
+    // price would otherwise sit in the inbox and fail at the next bar, long
+    // after the user could connect the rejection to what they typed.
+    const bool needs_limit = *type == ptl::oms::OrderType::Limit ||
+                             *type == ptl::oms::OrderType::StopLimit;
+    const bool needs_stop = *type == ptl::oms::OrderType::Stop ||
+                            *type == ptl::oms::OrderType::StopLimit;
+    if (needs_limit && !(request.limit_price > 0.0)) {
+        return ptl::fail(bad("a limit order needs a positive limit price"));
+    }
+    if (needs_stop && !(request.stop_price > 0.0)) {
+        return ptl::fail(bad("a stop order needs a positive stop price"));
+    }
+
+    HostStrategy::Request queued;
+    queued.request_id = impl_->next_request_id++;
+    queued.instrument = *instrument;
+    queued.side = request.side >= 0 ? ptl::Side::Buy : ptl::Side::Sell;
+    queued.quantity = ptl::Qty{request.quantity};
+    queued.type = *type;
+    queued.limit_price = ptl::Price{request.limit_price};
+    queued.stop_price = ptl::Price{request.stop_price};
+    queued.tif = *tif;
+
+    const auto id = queued.request_id;
+    impl_->strategy.enqueue(std::move(queued));
+    return id;
+}
+
+ptl::Result<bool> PaperSessionHost::enqueue_cancel(std::uint64_t order_id) {
+    if (state_ != HostState::Running || !impl_) {
+        return ptl::fail(bad("no running session to cancel against"));
+    }
+    const auto* record = impl_->oms.find(static_cast<ptl::oms::OrderId>(order_id));
+    if (record == nullptr) {
+        return ptl::fail(bad("no such order: " + std::to_string(order_id)));
+    }
+
+    HostStrategy::Request queued;
+    queued.request_id = impl_->next_request_id++;
+    queued.is_cancel = true;
+    queued.cancel_target = order_id;
+    impl_->strategy.enqueue(std::move(queued));
+    return true;
+}
+
+ptl::Result<std::size_t> PaperSessionHost::enqueue_cancel_all() {
+    if (state_ != HostState::Running || !impl_) {
+        return ptl::fail(bad("no running session"));
+    }
+    std::size_t queued = 0;
+    for (const auto id : impl_->oms.working()) {
+        if (enqueue_cancel(ptl::oms::value_of(id))) ++queued;
+    }
+    return queued;
+}
+
+ptl::Result<std::size_t> PaperSessionHost::enqueue_flatten() {
+    if (state_ != HostState::Running || !impl_) {
+        return ptl::fail(bad("no running session to flatten"));
+    }
+
+    // Cancel first, then close. Closing while an order still works could leave
+    // the book flat and an order live, which would immediately re-open a
+    // position the user asked to eliminate.
+    (void)enqueue_cancel_all();
+
+    std::size_t queued = 0;
+    for (const auto& [key, position] : impl_->portfolio.positions()) {
+        if (position.is_flat()) continue;
+
+        ManualOrder closing;
+        closing.symbol =
+            std::string{impl_->instruments.symbol(static_cast<ptl::InstrumentId>(key))};
+        // The OPPOSITE side, for the exact quantity held.
+        closing.side = position.quantity().get() > 0.0 ? -1 : 1;
+        closing.quantity = std::abs(position.quantity().get());
+        closing.type = "market";
+        if (enqueue_order(closing)) ++queued;
+    }
+    return queued;
+}
+
+std::string PaperSessionHost::pending_json() const {
+    if (!impl_) return R"({"pending": 0, "outcomes": []})";
+
+    std::ostringstream ss;
+    ss << "{\"pending\": " << impl_->strategy.pending() << ", \"outcomes\": [";
+    bool first = true;
+    const auto& outcomes = impl_->strategy.outcomes();
+    for (auto it = outcomes.rbegin(); it != outcomes.rend(); ++it) {
+        if (!first) ss << ", ";
+        first = false;
+        ss << "{\"request_id\": " << it->request_id << ", \"order_id\": "
+           << it->order_id << ", \"accepted\": " << (it->accepted ? "true" : "false")
+           << ", \"detail\": \"" << escape(it->detail) << "\"}";
+    }
+    ss << "]}";
+    return ss.str();
+}
+
+std::string PaperSessionHost::order_history_json() const {
+    if (!impl_) return R"({"available": false, "orders": []})";
+
+    std::ostringstream ss;
+    ss << "{\"available\": true, \"orders\": [";
+    bool first = true;
+    // Most recent first. The OMS exposes only working orders, so the ids the
+    // strategy recorded are the only way a filled or cancelled order stays
+    // visible in a blotter.
+    const auto& ids = impl_->strategy.submitted();
+    for (auto it = ids.rbegin(); it != ids.rend(); ++it) {
+        const auto* record = impl_->oms.find(static_cast<ptl::oms::OrderId>(*it));
+        if (record == nullptr) continue;
+        if (!first) ss << ", ";
+        first = false;
+        ss << "{\"order_id\": " << *it << ", \"symbol\": \""
+           << escape(impl_->instruments.symbol(record->order.instrument()))
+           << "\", \"state\": \"" << ptl::oms::to_string(record->state)
+           << "\", \"side\": " << (record->order.side() == ptl::Side::Buy ? 1 : -1)
+           << ", \"type\": \"" << ptl::oms::to_string(record->order.type())
+           << "\", \"quantity\": " << num(record->order.quantity().get())
+           << ", \"filled\": " << num(record->filled_quantity.get())
+           << ", \"reject_reason\": \"" << escape(record->reject_reason) << "\"}";
+    }
+    ss << "]}";
+    return ss.str();
+}
+
 void PaperSessionHost::record_sample() {
     if (!impl_ || !impl_->session) return;
 
@@ -597,6 +896,8 @@ std::string PaperSessionHost::snapshot_json() const {
     ss << "{\"state\": " << state_json() << ", \"portfolio\": " << portfolio_json()
        << ", \"positions\": " << positions_json() << ", \"orders\": " << orders_json()
        << ", \"fills\": " << fills_json() << ", \"history\": " << history_json(240)
+       << ", \"order_history\": " << order_history_json()
+       << ", \"pending\": " << pending_json()
        << ", \"instruments\": " << instruments_json() << '}';
     return ss.str();
 }

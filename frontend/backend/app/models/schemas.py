@@ -641,3 +641,89 @@ class ValidationResponse(BaseModel):
     issues: list[ValidationIssue] = Field(
         description="Every issue, not just the first: an operator should get one list."
     )
+
+
+# ---------------------------------------------------------------------------
+# Trading (F6)
+# ---------------------------------------------------------------------------
+
+
+class TradingMode(BaseModel):
+    """Which venue the session is trading against.
+
+    Surfaced so the interface can label it unambiguously. There is no live
+    broker connection and none is simulated: `live_available` is false and stays
+    false until a real adapter exists.
+    """
+
+    mode: Literal["PAPER", "LIVE"] = "PAPER"
+    live_available: bool = False
+    label: str = Field(description='"PAPER" or "LIVE (not connected)".')
+    detail: str = ""
+
+
+class OrderRequest(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {"symbol": "SPY", "side": 1, "quantity": 50, "type": "limit", "limit_price": 505.0},
+                {"symbol": "SPY", "side": -1, "quantity": 25, "type": "market"},
+            ]
+        }
+    )
+
+    symbol: str = Field(min_length=1, description="Must be an instrument the session trades.")
+    side: Literal[1, -1] = Field(description="1 buy, -1 sell.")
+    quantity: float = Field(gt=0)
+    type: Literal["market", "limit", "stop", "stop_limit"] = "market"
+    limit_price: float = Field(default=0.0, ge=0)
+    stop_price: float = Field(default=0.0, ge=0)
+    time_in_force: Literal["day", "ioc", "fok", "gtc"] = "day"
+
+
+class OrderAccepted(BaseModel):
+    """The order was QUEUED, not filled.
+
+    It reaches the engine at the next event and faces the risk gate there, so
+    acceptance here is not acceptance by the venue. `request_id` matches the
+    outcome that appears once it has been through.
+    """
+
+    request_id: int
+    queued: bool = True
+    detail: str = "queued; submitted at the next market event"
+
+
+class OrderOutcome(BaseModel):
+    request_id: int
+    order_id: int
+    accepted: bool
+    detail: str = Field(
+        default="", description="The engine's rejection reason when not accepted."
+    )
+
+
+class PendingOrders(BaseModel):
+    pending: int = Field(description="Requests not yet submitted to the engine.")
+    outcomes: list[OrderOutcome] = Field(default=[], description="Most recent first.")
+
+
+class OrderHistoryEntry(BaseModel):
+    order_id: int
+    symbol: str
+    state: str = Field(description="OMS state: working, filled, cancelled, rejected…")
+    side: int
+    type: str
+    quantity: float
+    filled: float
+    reject_reason: str = ""
+
+
+class OrderHistory(BaseModel):
+    available: bool
+    orders: list[OrderHistoryEntry] = []
+
+
+class BulkActionResponse(BaseModel):
+    action: Literal["cancel_all", "flatten"]
+    queued: int = Field(description="Requests enqueued, not orders completed.")

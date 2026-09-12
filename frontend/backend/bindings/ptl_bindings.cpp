@@ -424,6 +424,33 @@ template <typename T>
     return unwrap(host().step(max_events), "session step");
 }
 
+[[nodiscard]] std::uint64_t host_submit(const std::string& symbol, int side,
+                                        double quantity, const std::string& type,
+                                        double limit_price, double stop_price,
+                                        const std::string& time_in_force) {
+    ptl_host::ManualOrder request;
+    request.symbol = symbol;
+    request.side = side;
+    request.quantity = quantity;
+    request.type = type;
+    request.limit_price = limit_price;
+    request.stop_price = stop_price;
+    request.time_in_force = time_in_force;
+    return unwrap(host().enqueue_order(request), "submit order");
+}
+
+[[nodiscard]] bool host_cancel(std::uint64_t order_id) {
+    return unwrap(host().enqueue_cancel(order_id), "cancel order");
+}
+
+[[nodiscard]] std::size_t host_cancel_all() {
+    return unwrap(host().enqueue_cancel_all(), "cancel all");
+}
+
+[[nodiscard]] std::size_t host_flatten() {
+    return unwrap(host().enqueue_flatten(), "flatten");
+}
+
 }  // namespace
 
 PYBIND11_MODULE(ptl, m) {
@@ -485,6 +512,23 @@ PYBIND11_MODULE(ptl, m) {
     m.def("session_step", &host_step, py::arg("max_events") = 1,
           "Advance the session. Returns events processed; zero means the replay "
           "is exhausted, which is not an error.");
+    // Order entry. Five more FUNCTIONS, still no bound types: a manual order
+    // is queued as plain data and becomes an oms::Order only inside the engine,
+    // where the risk gate sees it exactly as it sees a strategy's own.
+    m.def("session_submit_order", &host_submit, py::arg("symbol"), py::arg("side"),
+          py::arg("quantity"), py::arg("type") = "market",
+          py::arg("limit_price") = 0.0, py::arg("stop_price") = 0.0,
+          py::arg("time_in_force") = "day",
+          "Queue a manual order. Returns a request id; the order is submitted "
+          "at the next event, never instantaneously.");
+    m.def("session_cancel_order", &host_cancel, py::arg("order_id"),
+          "Queue a cancel for a working order.");
+    m.def("session_cancel_all", &host_cancel_all,
+          "Queue cancels for every working order.");
+    m.def("session_flatten", &host_flatten,
+          "Cancel everything working, then queue market orders closing every "
+          "open position. Paper only.");
+
     m.def("session_state", []() { return host().state_json(); },
           "Lifecycle state and counters, as JSON.");
     m.def("session_snapshot", []() { return host().snapshot_json(); },

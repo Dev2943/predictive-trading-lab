@@ -14,7 +14,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routers import artifacts, capabilities, compute, session, system
+from .routers import artifacts, capabilities, compute, session, system, trading
 
 app = FastAPI(
     title="Predictive Trading Lab API",
@@ -37,6 +37,13 @@ app = FastAPI(
         {
             "name": "artifacts",
             "description": "State a session previously persisted.",
+        },
+        {
+            "name": "trading",
+            "description": (
+                "Order entry and management. Every command is queued through "
+                "the session driver and reaches the engine at the next event."
+            ),
         },
         {
             "name": "compute",
@@ -63,7 +70,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
     allow_credentials=True,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["*"],
 )
 
@@ -72,6 +79,7 @@ app.include_router(capabilities.router)
 app.include_router(artifacts.router)
 app.include_router(session.router)
 app.include_router(compute.router)
+app.include_router(trading.router)
 
 
 @app.get("/", tags=["system"], summary="Service banner")
@@ -80,5 +88,5 @@ def root() -> dict[str, str]:
         "service": "predictive-trading-lab-api",
         "docs": "/docs",
         "openapi": "/openapi.json",
-        "phase": "F5 (computation)",
+        "phase": "F6 (trading)",
     }

@@ -375,3 +375,286 @@ def test_history_endpoints_do_not_touch_the_session(history_client):
 
     # Any change is the driver thread stepping, never a reader.
     assert backend.start_calls == 1
+
+
+# ---------------------------------------------------------------------------
+# F6: trading commands
+# ---------------------------------------------------------------------------
+
+
+class TradingBackend(FakeBackend):
+    """A backend that records trading commands."""
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.orders: list[dict] = []
+        self.cancels: list[int] = []
+        self.flattens = 0
+        self.next_request = 1
+
+    def session_submit_order(self, **kwargs) -> int:
+        if kwargs.get("symbol") == "UNKNOWN":
+            raise RuntimeError("submit order: unknown symbol: UNKNOWN")
+        self.orders.append(kwargs)
+        rid = self.next_request
+        self.next_request += 1
+        return rid
+
+    def session_cancel_order(self, order_id: int) -> bool:
+        if order_id == 999:
+            raise RuntimeError("cancel order: no such order: 999")
+        self.cancels.append(order_id)
+        return True
+
+    def session_cancel_all(self) -> int:
+        return 3
+
+    def session_flatten(self) -> int:
+        self.flattens += 1
+        return 2
+
+    def session_snapshot(self) -> str:
+        base = json.loads(super().session_snapshot())
+        base["pending"] = {
+            "pending": 0,
+            "outcomes": [
+                {"request_id": 1, "order_id": 7, "accepted": True, "detail": ""},
+            ],
+        }
+        base["order_history"] = {
+            "available": self.started,
+            "orders": [
+                {
+                    "order_id": 7,
+                    "symbol": "SPY",
+                    "state": "filled",
+                    "side": 1,
+                    "type": "limit",
+                    "quantity": 50.0,
+                    "filled": 50.0,
+                    "reject_reason": "",
+                }
+            ],
+        }
+        return json.dumps(base)
+
+
+@pytest.fixture
+def trading_client():
+    driver = SessionDriver(TradingBackend(), step_size=25)
+    app.dependency_overrides[get_driver] = lambda: driver
+    with TestClient(app) as client:
+        yield client, driver
+    app.dependency_overrides.clear()
+    driver.shutdown()
+
+
+def test_trading_mode_is_paper_and_says_live_is_unavailable(trading_client):
+    """No live broker is connected and none is simulated."""
+    client, _ = trading_client
+    body = client.get("/trading/mode").json()
+    assert body["mode"] == "PAPER"
+    assert body["live_available"] is False
+
+
+def test_an_order_requires_a_running_session(trading_client):
+    """409: the request was well-formed and refused for when it arrived."""
+    client, _ = trading_client
+    response = client.post(
+        "/trading/orders", json={"symbol": "SPY", "side": 1, "quantity": 10}
+    )
+    assert response.status_code == 409
+
+
+def test_an_order_is_queued_not_filled(trading_client):
+    client, driver = trading_client
+    client.post("/session/start", json={})
+
+    body = client.post(
+        "/trading/orders",
+        json={"symbol": "SPY", "side": 1, "quantity": 50, "type": "limit", "limit_price": 505.0},
+    ).json()
+    assert body["queued"] is True
+    assert body["request_id"] == 1
+    # The response must not imply a fill.
+    assert "queued" in body["detail"]
+
+    backend = driver._backend  # noqa: SLF001
+    assert backend.orders[0]["symbol"] == "SPY"
+    assert backend.orders[0]["limit_price"] == 505.0
+
+
+def test_an_unknown_symbol_is_422_with_the_engines_reason(trading_client):
+    client, _ = trading_client
+    client.post("/session/start", json={})
+    response = client.post(
+        "/trading/orders", json={"symbol": "UNKNOWN", "side": 1, "quantity": 10}
+    )
+    assert response.status_code == 422
+    assert "unknown symbol" in response.json()["detail"]
+
+
+def test_order_validation_rejects_impossible_requests(trading_client):
+    client, _ = trading_client
+    client.post("/session/start", json={})
+    # Quantity must be positive.
+    assert (
+        client.post(
+            "/trading/orders", json={"symbol": "SPY", "side": 1, "quantity": 0}
+        ).status_code
+        == 422
+    )
+    # Side is 1 or -1, nothing else.
+    assert (
+        client.post(
+            "/trading/orders", json={"symbol": "SPY", "side": 2, "quantity": 10}
+        ).status_code
+        == 422
+    )
+    # And an unknown order type.
+    assert (
+        client.post(
+            "/trading/orders",
+            json={"symbol": "SPY", "side": 1, "quantity": 10, "type": "iceberg"},
+        ).status_code
+        == 422
+    )
+
+
+def test_cancel_is_queued(trading_client):
+    client, driver = trading_client
+    client.post("/session/start", json={})
+    assert client.delete("/trading/orders/7").status_code == 200
+    assert driver._backend.cancels == [7]  # noqa: SLF001
+
+
+def test_cancelling_an_unknown_order_is_422(trading_client):
+    client, _ = trading_client
+    client.post("/session/start", json={})
+    assert client.delete("/trading/orders/999").status_code == 422
+
+
+def test_cancel_all_and_flatten_report_what_they_queued(trading_client):
+    client, driver = trading_client
+    client.post("/session/start", json={})
+
+    cancelled = client.post("/trading/cancel-all").json()
+    assert cancelled["queued"] == 3
+
+    flattened = client.post("/trading/flatten").json()
+    assert flattened["queued"] == 2
+    assert driver._backend.flattens == 1  # noqa: SLF001
+
+
+def test_flatten_requires_a_running_session(trading_client):
+    client, _ = trading_client
+    assert client.post("/trading/flatten").status_code == 409
+
+
+def test_pending_and_history_come_from_the_snapshot(trading_client):
+    client, _ = trading_client
+    client.post("/session/start", json={})
+
+    pending = client.get("/trading/pending").json()
+    assert pending["outcomes"][0]["order_id"] == 7
+
+    history = client.get("/trading/orders").json()
+    assert history["available"] is True
+    assert history["orders"][0]["state"] == "filled"
+    assert history["orders"][0]["symbol"] == "SPY"
+
+
+def test_a_failed_trading_command_does_not_halt_the_session(trading_client):
+    """One mistyped order must not stop the book.
+
+    An unknown symbol is the caller's mistake. Driving the session to ERROR
+    would leave a live book unattended for a reason unrelated to the book.
+    """
+    client, driver = trading_client
+    client.post("/session/start", json={})
+
+    response = client.post(
+        "/trading/orders", json={"symbol": "UNKNOWN", "side": 1, "quantity": 10}
+    )
+    assert response.status_code == 422
+    # Still running, and still accepting orders.
+    assert driver.state is SessionState.RUNNING
+    assert (
+        client.post(
+            "/trading/orders", json={"symbol": "SPY", "side": 1, "quantity": 10}
+        ).status_code
+        == 200
+    )
+
+
+def test_a_failed_start_still_halts_the_session():
+    """Lifecycle failures are different: the session really is in an unknown
+    state, so ERROR is correct there."""
+    driver = SessionDriver(FakeBackend(start_fails=True))
+    try:
+        with pytest.raises(RuntimeError):
+            driver.start(session_id="t")
+        assert driver.state is SessionState.ERROR
+    finally:
+        driver.shutdown()
+
+
+# ---------------------------------------------------------------------------
+# F6: broker abstraction
+# ---------------------------------------------------------------------------
+
+
+def test_the_live_adapter_refuses_rather_than_falling_back_to_paper():
+    """The most dangerous bug this system could have would be an interface that
+    quietly executed against paper while believing it was live."""
+    from app.engine.brokers import BrokerUnavailable, LiveBrokerAdapter
+
+    live = LiveBrokerAdapter()
+    assert live.connected is False
+    for call in (
+        lambda: live.submit({}),
+        lambda: live.cancel(1),
+        lambda: live.cancel_all(),
+        live.account,
+        live.positions,
+    ):
+        with pytest.raises(BrokerUnavailable, match="no live broker"):
+            call()
+
+
+def test_the_router_refuses_an_unconnected_venue():
+    from app.engine.brokers import (
+        BrokerUnavailable,
+        LiveBrokerAdapter,
+        OrderRouter,
+        PaperBrokerAdapter,
+    )
+
+    router = OrderRouter()
+    router.register(PaperBrokerAdapter(driver=None))
+    router.register(LiveBrokerAdapter())
+
+    assert router.available() == ["paper"]
+    assert router.route("paper").name == "paper"
+    with pytest.raises(BrokerUnavailable, match="not connected"):
+        router.route("live")
+    with pytest.raises(BrokerUnavailable, match="no adapter"):
+        router.route("nyse")
+
+
+def test_the_paper_adapter_delegates_to_the_driver_rather_than_re_implementing():
+    """A second submission path is exactly what F6 exists to avoid."""
+    from app.engine.brokers import PaperBrokerAdapter
+
+    driver = SessionDriver(TradingBackend(), step_size=25)
+    try:
+        driver.start(session_id="adapter")
+        adapter = PaperBrokerAdapter(driver)
+        assert adapter.connected is True
+        request_id = adapter.submit(
+            {"symbol": "SPY", "side": 1, "quantity": 10, "type": "market"}
+        )
+        assert request_id == 1
+        assert driver._backend.orders[0]["symbol"] == "SPY"  # noqa: SLF001
+    finally:
+        driver.shutdown()
