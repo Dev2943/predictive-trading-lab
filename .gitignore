@@ -44,3 +44,4 @@ CMakeCache.txt
 # Node
 node_modules/
 .next/
+Zip/
