@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import enum
 import json
+import os
 import queue
 import threading
 import time
@@ -153,6 +154,13 @@ class SessionDriver:
     # --- writer side: commands only ---------------------------------------
 
     def start(self, **kwargs: Any) -> None:
+        """Start a session.
+
+        `artifact_root` defaults from PTL_RESULTS, matching the EngineClient, so
+        a test run can direct session state to a temporary directory instead of
+        writing into the repository's results tree.
+        """
+        kwargs.setdefault("artifact_root", os.environ.get("PTL_RESULTS", "results"))
         self._require(SessionState.STARTING, "start")
         self._ensure_thread()
         self._submit(_Command("start", kwargs))

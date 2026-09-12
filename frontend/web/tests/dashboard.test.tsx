@@ -160,7 +160,7 @@ describe("dashboard", () => {
 
     // Every value is one the engine produced; the client computes none of them.
     expect(await screen.findByText("1,000,052.29")).toBeInTheDocument();
-    expect(screen.getByText("Positions")).toBeInTheDocument();
+    expect(screen.getAllByText("Positions").length).toBeGreaterThan(0);
     expect(screen.getByText("500.25")).toBeInTheDocument();
     expect(screen.getAllByText("BUY").length).toBeGreaterThan(0);
   });

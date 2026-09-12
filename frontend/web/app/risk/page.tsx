@@ -2,6 +2,7 @@
 
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
+import { ErrorPanel } from "@/components/feedback";
 import { api, type RiskLimits, type ValidationResponse } from "@/lib/api";
 
 /**
@@ -105,11 +106,7 @@ export default function RiskPage() {
         </button>
       </section>
 
-      {validate.isError && (
-        <div className="rounded border border-loss/40 bg-loss/10 p-3 text-loss">
-          {validate.error.message}
-        </div>
-      )}
+      <ErrorPanel error={validate.error} />
 
       {validate.data && (
         <section className="rounded border border-surface-border bg-surface-raised p-4">

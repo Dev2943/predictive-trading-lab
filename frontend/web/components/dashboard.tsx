@@ -2,7 +2,8 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { EquityChart } from "@/components/equity-chart";
-import { api, ApiError, type SessionStatus } from "@/lib/api";
+import { ErrorPanel } from "@/components/feedback";
+import { api, type SessionStatus } from "@/lib/api";
 
 /**
  * The paper session dashboard.
@@ -79,11 +80,9 @@ export function Dashboard() {
 
   const account = snapshot.data?.account;
   const engine = status.data?.engine ?? {};
-  const lastError =
-    status.data?.error ??
-    (start.error ?? stop.error ?? reset.error
-      ? ((start.error ?? stop.error ?? reset.error) as Error).message
-      : null);
+  // The engine's own session error, distinct from a request failure: one means
+  // the session is unhealthy, the other that this request did not land.
+  const engineError = status.data?.error ?? null;
 
   return (
     <div className="space-y-6">
@@ -144,14 +143,10 @@ export function Dashboard() {
         </div>
       </section>
 
-      {lastError && (
-        <div className="rounded border border-loss/40 bg-loss/10 p-3 text-loss">
-          {lastError}
-          {(start.error as ApiError | null)?.status === 409 && (
-            <span className="ml-2 text-content-faint">
-              (the session state does not permit that)
-            </span>
-          )}
+      <ErrorPanel error={status.error ?? start.error ?? stop.error ?? reset.error} />
+      {engineError && (
+        <div role="alert" className="rounded border border-warn/40 bg-warn/10 p-3 text-warn">
+          session reported: {engineError}
         </div>
       )}
 
@@ -257,10 +252,13 @@ function Table<T>({
         <p className="px-4 py-6 text-content-faint">{empty}</p>
       ) : (
         <table className="w-full text-left">
+          {/* Screen readers announce the caption before the rows, so a table
+              is identifiable without the visual heading above it. */}
+          <caption className="sr-only">{title}</caption>
           <thead className="text-xs text-content-faint">
             <tr>
               {columns.map((c) => (
-                <th key={c} className="px-4 py-2 font-normal">
+                <th key={c} scope="col" className="px-4 py-2 font-normal">
                   {c}
                 </th>
               ))}

@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import { ErrorPanel } from "@/components/feedback";
 import { api, type OptimizeResponse } from "@/lib/api";
 
 /**
@@ -163,12 +164,8 @@ export default function OptimizationPage() {
         </table>
       </section>
 
-      {run.isError && (
-        <div className="rounded border border-loss/40 bg-loss/10 p-3 text-loss">
-          {/* The engine's reason, which says what to change. */}
-          {run.error.message}
-        </div>
-      )}
+      {/* The engine's reason, which says what to change. */}
+      <ErrorPanel error={run.error ?? estimate.error} />
 
       {run.data && (
         <section className="rounded border border-surface-border bg-surface-raised p-4">

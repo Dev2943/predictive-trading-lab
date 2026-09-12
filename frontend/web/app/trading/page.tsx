@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { ErrorPanel } from "@/components/feedback";
 import { api, type OrderRequest } from "@/lib/api";
 
 /**
@@ -92,9 +93,7 @@ export default function TradingPage() {
   const busy = submit.isPending || cancelAll.isPending || flatten.isPending;
   const halted = session.data?.engine?.strategy_halted === true;
   const lastError =
-    (submit.error ?? cancelAll.error ?? flatten.error ?? cancel.error ?? halt.error) as
-      | Error
-      | null;
+    submit.error ?? cancelAll.error ?? flatten.error ?? cancel.error ?? halt.error;
 
   const working = (history.data?.orders ?? []).filter((o) =>
     ["working", "partially_filled", "pending_new", "new"].includes(o.state),
@@ -166,11 +165,7 @@ export default function TradingPage() {
         <p className="text-xs text-content-faint">{mode.data.detail}</p>
       )}
 
-      {lastError && (
-        <div className="rounded border border-loss/40 bg-loss/10 p-3 text-loss">
-          {lastError.message}
-        </div>
-      )}
+      <ErrorPanel error={lastError} />
 
       {/* --- order entry --------------------------------------------------- */}
       <section className="rounded border border-surface-border bg-surface-raised p-4">
@@ -295,10 +290,11 @@ export default function TradingPage() {
           <p className="px-4 py-6 text-content-faint">no working orders</p>
         ) : (
           <table className="w-full text-left">
+            <caption className="sr-only">Working orders</caption>
             <thead className="text-xs text-content-faint">
               <tr>
                 {["id", "symbol", "side", "type", "quantity", "filled", ""].map((c) => (
-                  <th key={c} className="px-4 py-2 font-normal">
+                  <th key={c} scope="col" className="px-4 py-2 font-normal">
                     {c}
                   </th>
                 ))}
@@ -316,6 +312,7 @@ export default function TradingPage() {
                   <td className="px-4 py-1.5">
                     <button
                       onClick={() => cancel.mutate(order.order_id)}
+                      aria-label={`cancel order ${order.order_id}`}
                       disabled={!running}
                       className="text-content-faint hover:text-loss disabled:opacity-30"
                     >
@@ -338,10 +335,11 @@ export default function TradingPage() {
           <p className="px-4 py-6 text-content-faint">no executions yet</p>
         ) : (
           <table className="w-full text-left">
+            <caption className="sr-only">Trade blotter</caption>
             <thead className="text-xs text-content-faint">
               <tr>
                 {["time", "symbol", "side", "quantity", "price", "fees"].map((c) => (
-                  <th key={c} className="px-4 py-2 font-normal">
+                  <th key={c} scope="col" className="px-4 py-2 font-normal">
                     {c}
                   </th>
                 ))}

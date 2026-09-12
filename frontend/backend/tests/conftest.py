@@ -24,6 +24,19 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
+def _isolated_artifact_root(tmp_path_factory, monkeypatch):
+    """Keep session artifacts out of the repository.
+
+    Sessions persist state under their artifact root, which defaults to
+    `results/`. Left alone, a test run writes real session directories into the
+    checkout and the repository is no longer clean after running the suite.
+    """
+    root = tmp_path_factory.mktemp("ptl-results")
+    monkeypatch.setenv("PTL_RESULTS", str(root))
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _clean_session_host():
     """Guarantee a clean C++ session host around every test.
 

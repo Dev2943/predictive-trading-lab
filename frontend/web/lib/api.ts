@@ -1,6 +1,11 @@
 /**
  * The single point of contact with the gateway.
  *
+ * Only endpoints the interface actually consumes appear here. The API exposes
+ * more -- persisted artifacts, diagnostics, reports -- which remain available
+ * to programmatic clients and are documented in the OpenAPI schema. Carrying
+ * unused wrappers here would suggest a UI path that does not exist.
+ *
  * EVERY network call in the application goes through here. No component calls
  * fetch directly, so when the engine moves behind a remote gateway the change
  * is one base URL in one file.
@@ -312,29 +317,11 @@ export interface CovarianceResponse {
   degradation_reason: string;
 }
 
-export interface ArtifactList {
-  prefix: string;
-  keys: string[];
-  count: number;
-}
-
-export interface ArtifactEnvelope {
-  available: boolean;
-  key: string;
-  data: Record<string, unknown> | null;
-  detail: string;
-}
-
 export const api = {
-  health: () => request<HealthResponse>("/health"),
-  version: () => request<VersionInfo>("/version"),
-  fingerprints: () => request<Fingerprints>("/fingerprints"),
   /** One request for a status header, rather than three. */
   system: () => request<SystemInfo>("/system"),
 
   session: () => request<SessionStatus>("/session"),
-  history: () => request<EquityHistory>("/session/history"),
-  instruments: () => request<Instrument[]>("/session/instruments"),
 
   tradingMode: () => request<TradingMode>("/trading/mode"),
   halt: (halted: boolean) =>
@@ -370,10 +357,6 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ observations, method }),
     }),
-  artifacts: (prefix = "") =>
-    request<ArtifactList>(`/artifacts?prefix=${encodeURIComponent(prefix)}`),
-  diagnostics: () => request<ArtifactEnvelope>("/diagnostics"),
-  reports: () => request<ArtifactList>("/reports"),
 
   optimizers: () => request<OptimizationCapabilities>("/optimization"),
   optimize: (body: OptimizeRequest) =>

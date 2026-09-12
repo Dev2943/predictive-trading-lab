@@ -22,7 +22,7 @@ export function Nav() {
   const pathname = usePathname();
 
   return (
-    <nav className="mb-6 flex gap-1 border-b border-surface-border">
+    <nav aria-label="Main" className="mb-6 flex gap-1 border-b border-surface-border">
       {LINKS.map((link) => {
         const active = pathname === link.href;
         return (

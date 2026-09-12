@@ -11,6 +11,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { ErrorPanel } from "@/components/feedback";
 import { api, type EquityPoint } from "@/lib/api";
 
 /**
@@ -115,11 +116,7 @@ export default function AnalyticsPage() {
         )}
       </section>
 
-      {(rolling.isError || factors.isError) && (
-        <div className="rounded border border-loss/40 bg-loss/10 p-3 text-loss">
-          {((rolling.error ?? factors.error) as Error).message}
-        </div>
-      )}
+      <ErrorPanel error={rolling.error ?? factors.error} />
 
       {rolling.data && (
         <section className="rounded border border-surface-border bg-surface-raised p-4">

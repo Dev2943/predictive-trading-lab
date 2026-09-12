@@ -199,7 +199,7 @@ describe("trading workspace", () => {
 
     // Only the working order appears here; the filled one belongs in the blotter.
     expect(await screen.findByText("7")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "cancel" }));
+    await userEvent.click(screen.getByRole("button", { name: "cancel order 7" }));
     await waitFor(() =>
       expect(calls.some((c) => c.endsWith("/trading/orders/7"))).toBe(true),
     );

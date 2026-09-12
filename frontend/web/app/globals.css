@@ -12,3 +12,17 @@ body {
      measurably harder to read at a glance. */
   font-variant-numeric: tabular-nums;
 }
+
+/* Tailwind ships .sr-only; declared here as well so the caption elements keep
+   working if the utility layer is ever purged more aggressively. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
