@@ -58,6 +58,10 @@ TRADING_POSTS = {
     "/trading/halt",
 }
 TRADING_DELETES = {"/trading/orders/{order_id}"}
+# P9. These mutate DISPLAY state -- which feed the watchlist shows and which
+# symbols are on it. Neither reaches the engine, so they are classified apart
+# from both lifecycle and compute.
+MARKET_POSTS = {"/market/mode/{mode}", "/market/watchlist"}
 
 
 def test_post_endpoints_are_either_lifecycle_or_stateless_computation():
@@ -74,7 +78,7 @@ def test_post_endpoints_are_either_lifecycle_or_stateless_computation():
     """
     schema = app.openapi()
     posts = {path for path, operations in schema["paths"].items() if "post" in operations}
-    assert posts == LIFECYCLE_POSTS | COMPUTE_POSTS | TRADING_POSTS
+    assert posts == LIFECYCLE_POSTS | COMPUTE_POSTS | TRADING_POSTS | MARKET_POSTS
 
     deletes = {
         path for path, operations in schema["paths"].items() if "delete" in operations
@@ -92,7 +96,7 @@ def test_post_endpoints_are_either_lifecycle_or_stateless_computation():
             assert set(operations) == {"get"}, f"{path} exposes a non-GET verb"
 
     # The surface is real, so the assertions above are not vacuous.
-    assert len(schema["paths"]) >= 30
+    assert len(schema["paths"]) >= 38
 
 
 def test_compute_endpoints_do_not_touch_the_session(client):

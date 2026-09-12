@@ -14,7 +14,15 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routers import artifacts, capabilities, compute, session, system, trading
+from .routers import (
+    artifacts,
+    capabilities,
+    compute,
+    market,
+    session,
+    system,
+    trading,
+)
 
 app = FastAPI(
     title="Predictive Trading Lab API",
@@ -37,6 +45,14 @@ app = FastAPI(
         {
             "name": "artifacts",
             "description": "State a session previously persisted.",
+        },
+        {
+            "name": "market",
+            "description": (
+                "Live or replay market data for display. Never reaches the "
+                "engine: the paper session runs on its own deterministic "
+                "replay regardless of what this shows."
+            ),
         },
         {
             "name": "trading",
@@ -80,6 +96,7 @@ app.include_router(artifacts.router)
 app.include_router(session.router)
 app.include_router(compute.router)
 app.include_router(trading.router)
+app.include_router(market.router)
 
 
 @app.get("/", tags=["system"], summary="Service banner")
@@ -88,5 +105,5 @@ def root() -> dict[str, str]:
         "service": "predictive-trading-lab-api",
         "docs": "/docs",
         "openapi": "/openapi.json",
-        "phase": "F6 (trading)",
+        "phase": "P9 (live market data)",
     }

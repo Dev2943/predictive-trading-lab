@@ -13,6 +13,7 @@ from typing import Annotated
 
 from fastapi import Depends, HTTPException, status
 
+from .market import MarketDataService
 from .engine import (
     EngineClient,
     EngineUnavailable,
@@ -86,3 +87,29 @@ def get_driver() -> SessionDriver:
 
 
 Driver = Annotated[SessionDriver, Depends(get_driver)]
+
+
+@functools.lru_cache(maxsize=1)
+def _market() -> MarketDataService:
+    """The single market data service.
+
+    One per process, so every client shares one watchlist and one provider
+    connection. A service per request would open a WebSocket per browser tab.
+
+    A live provider is constructed only when credentials are present. Without
+    them the service offers replay and refuses `live` with a reason, rather
+    than pretending a feed exists.
+    """
+    live = None
+    if os.environ.get("PTL_ALPACA_KEY") and os.environ.get("PTL_ALPACA_SECRET"):
+        from .market.live import AlpacaLiveProvider
+
+        live = AlpacaLiveProvider()
+    return MarketDataService(live=live)
+
+
+def get_market() -> MarketDataService:
+    return _market()
+
+
+Market = Annotated[MarketDataService, Depends(get_market)]

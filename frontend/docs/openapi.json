@@ -1350,6 +1350,139 @@
         }
       }
     },
+    "/market/status": {
+      "get": {
+        "tags": [
+          "market"
+        ],
+        "summary": "Feed mode, connection and watchlist",
+        "description": "`connected` is the provider's own view. In replay it is always true and `provider` reads `synthetic-replay`, so a client can never present generated prices as a market.",
+        "operationId": "status_market_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/market/quotes": {
+      "get": {
+        "tags": [
+          "market"
+        ],
+        "summary": "Current top of book for the watchlist",
+        "description": "Top of book only \u2014 the system models no depth (ADR-0003), so there is none to return.\n\nA subscribed symbol that has produced nothing appears as an empty row rather than being omitted: the watchlist should show what was asked for, including which entries are silent.",
+        "operationId": "quotes_market_quotes_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/QuoteView"
+                  },
+                  "type": "array",
+                  "title": "Response Quotes Market Quotes Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/market/mode/{mode}": {
+      "post": {
+        "tags": [
+          "market"
+        ],
+        "summary": "Select replay or live market data",
+        "description": "Switching to `live` without a configured provider is **refused**, not silently downgraded. A panel labelled LIVE showing synthetic prices would be the most misleading thing this interface could do.\n\nThis changes only what the watchlist displays. The paper session continues on its own deterministic replay either way.",
+        "operationId": "set_mode_market_mode__mode__post",
+        "parameters": [
+          {
+            "name": "mode",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Mode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketStatus"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The provider refused, and says why.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/market/watchlist": {
+      "post": {
+        "tags": [
+          "market"
+        ],
+        "summary": "Replace the watchlist",
+        "description": "Symbols are upper-cased and de-duplicated. A symbol containing punctuation is refused rather than stripped: rewriting it would hide whether it was a typo or something worse.",
+        "operationId": "watchlist_market_watchlist_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Watchlist"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketStatus"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The provider refused, and says why.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/": {
       "get": {
         "tags": [
@@ -2286,6 +2419,58 @@
         ],
         "title": "Instrument"
       },
+      "MarketStatus": {
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "replay",
+              "live"
+            ],
+            "title": "Mode"
+          },
+          "connected": {
+            "type": "boolean",
+            "title": "Connected"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "default": ""
+          },
+          "symbols": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Symbols",
+            "default": []
+          },
+          "last_update": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Update"
+          }
+        },
+        "type": "object",
+        "required": [
+          "mode",
+          "connected",
+          "provider"
+        ],
+        "title": "MarketStatus",
+        "description": "Whether the feed is usable, and why not when it is not."
+      },
       "OpenOrder": {
         "properties": {
           "order_id": {
@@ -2966,6 +3151,118 @@
         ],
         "title": "PositionsResponse"
       },
+      "QuoteView": {
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "title": "Symbol"
+          },
+          "bid": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bid"
+          },
+          "ask": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ask"
+          },
+          "last": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last"
+          },
+          "volume": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Volume"
+          },
+          "ts": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ts",
+            "description": "Provider timestamp, UTC."
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "replay",
+              "live"
+            ],
+            "title": "Source"
+          },
+          "spread_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spread Value"
+          },
+          "spread_bps": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spread Bps"
+          }
+        },
+        "type": "object",
+        "required": [
+          "symbol",
+          "source"
+        ],
+        "title": "QuoteView",
+        "description": "A quote as sent to a client, with the spread resolved.",
+        "examples": [
+          {
+            "ask": 503.13,
+            "bid": 503.11,
+            "last": 503.12,
+            "source": "replay",
+            "symbol": "SPY",
+            "ts": "2024-07-02T14:31:05Z",
+            "volume": 1240000
+          }
+        ]
+      },
       "RiskCapabilities": {
         "properties": {
           "validated_limits": {
@@ -3554,6 +3851,20 @@
             "transport": "in-process"
           }
         ]
+      },
+      "Watchlist": {
+        "properties": {
+          "symbols": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Symbols",
+            "default": []
+          }
+        },
+        "type": "object",
+        "title": "Watchlist"
       }
     }
   },
@@ -3569,6 +3880,10 @@
     {
       "name": "artifacts",
       "description": "State a session previously persisted."
+    },
+    {
+      "name": "market",
+      "description": "Live or replay market data for display. Never reaches the engine: the paper session runs on its own deterministic replay regardless of what this shows."
     },
     {
       "name": "trading",
