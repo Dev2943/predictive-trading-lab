@@ -390,6 +390,7 @@ class TradingBackend(FakeBackend):
         self.orders: list[dict] = []
         self.cancels: list[int] = []
         self.flattens = 0
+        self.halted = False
         self.next_request = 1
 
     def session_submit_order(self, **kwargs) -> int:
@@ -412,6 +413,10 @@ class TradingBackend(FakeBackend):
     def session_flatten(self) -> int:
         self.flattens += 1
         return 2
+
+    def session_set_halted(self, halted: bool) -> bool:
+        self.halted = halted
+        return halted
 
     def session_snapshot(self) -> str:
         base = json.loads(super().session_snapshot())
@@ -658,3 +663,49 @@ def test_the_paper_adapter_delegates_to_the_driver_rather_than_re_implementing()
         assert driver._backend.orders[0]["symbol"] == "SPY"  # noqa: SLF001
     finally:
         driver.shutdown()
+
+
+# ---------------------------------------------------------------------------
+# F7: strategy halt
+# ---------------------------------------------------------------------------
+
+
+def test_halting_requires_a_running_session(trading_client):
+    client, _ = trading_client
+    assert client.post("/trading/halt", json={"halted": True}).status_code == 409
+
+
+def test_halt_is_a_flag_not_a_lifecycle_transition(trading_client):
+    """The session stays RUNNING.
+
+    Halting is the control between flatten (acts on the book) and stop (tears
+    the session down). If it moved the lifecycle it would be a second stop.
+    """
+    client, driver = trading_client
+    client.post("/session/start", json={})
+
+    body = client.post("/trading/halt", json={"halted": True}).json()
+    assert body["strategy_halted"] is True
+    assert driver.state is SessionState.RUNNING
+    # The response says what remains active, so the control is not mistaken
+    # for a stop.
+    assert "manual orders" in body["detail"]
+
+    resumed = client.post("/trading/halt", json={"halted": False}).json()
+    assert resumed["strategy_halted"] is False
+    assert driver.state is SessionState.RUNNING
+
+
+def test_manual_orders_still_work_while_halted(trading_client):
+    """Halting suppresses the STRATEGY, not the operator."""
+    client, driver = trading_client
+    client.post("/session/start", json={})
+    client.post("/trading/halt", json={"halted": True})
+
+    assert (
+        client.post(
+            "/trading/orders", json={"symbol": "SPY", "side": 1, "quantity": 10}
+        ).status_code
+        == 200
+    )
+    assert driver._backend.orders  # noqa: SLF001

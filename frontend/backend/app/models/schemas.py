@@ -331,6 +331,13 @@ class EngineSessionState(BaseModel):
     )
     phase: str | None = None
     trading_permitted: bool | None = None
+    strategy_halted: bool | None = Field(
+        default=None,
+        description=(
+            "The strategy is suppressed but the session is running: data "
+            "flows, the book marks, and manual orders still work."
+        ),
+    )
     events_processed: int | None = None
     orders_submitted: int | None = None
     orders_rejected: int | None = None
@@ -727,3 +734,15 @@ class OrderHistory(BaseModel):
 class BulkActionResponse(BaseModel):
     action: Literal["cancel_all", "flatten"]
     queued: int = Field(description="Requests enqueued, not orders completed.")
+
+
+class HaltRequest(BaseModel):
+    halted: bool = Field(description="True suppresses strategy order generation.")
+
+
+class HaltResponse(BaseModel):
+    strategy_halted: bool
+    detail: str = Field(
+        default="",
+        description="What remains active while halted, so the control is not mistaken for a stop.",
+    )

@@ -1276,6 +1276,58 @@
         }
       }
     },
+    "/trading/halt": {
+      "post": {
+        "tags": [
+          "trading"
+        ],
+        "summary": "Suppress or resume strategy order generation",
+        "description": "The control between `flatten` and `stop`.\n\n`flatten` acts on the book \u2014 close what is held. `stop` tears the session down and loses it. Halting acts on the **strategy**: it stops generating orders while the session keeps running, data keeps flowing, the book keeps marking and manual orders still work.\n\nWithout it, an operator who wanted the model to pause had to destroy the session, which is the wrong remedy for 'hold on a moment'.",
+        "operationId": "halt_trading_halt_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HaltRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HaltResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "No running session, or the lifecycle forbids this.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/trading/pending": {
       "get": {
         "tags": [
@@ -1750,6 +1802,18 @@
             ],
             "title": "Trading Permitted"
           },
+          "strategy_halted": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Strategy Halted",
+            "description": "The strategy is suppressed but the session is running: data flows, the book marks, and manual orders still work."
+          },
           "events_processed": {
             "anyOf": [
               {
@@ -2129,6 +2193,39 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "HaltRequest": {
+        "properties": {
+          "halted": {
+            "type": "boolean",
+            "title": "Halted",
+            "description": "True suppresses strategy order generation."
+          }
+        },
+        "type": "object",
+        "required": [
+          "halted"
+        ],
+        "title": "HaltRequest"
+      },
+      "HaltResponse": {
+        "properties": {
+          "strategy_halted": {
+            "type": "boolean",
+            "title": "Strategy Halted"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "What remains active while halted, so the control is not mistaken for a stop.",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "strategy_halted"
+        ],
+        "title": "HaltResponse"
       },
       "HealthResponse": {
         "properties": {

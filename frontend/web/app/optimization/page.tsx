@@ -32,9 +32,27 @@ export default function OptimizationPage() {
 
   const capabilities = useQuery({ queryKey: ["optimizers"], queryFn: api.optimizers });
 
+  // Estimated from the same synthetic observations the engine would use, so an
+  // optimizer that REQUIRES a covariance can actually be run. Before F7 the
+  // page warned the user that minimum_variance would be refused and then
+  // offered no way to satisfy it.
+  const estimate = useMutation({
+    mutationFn: () => {
+      const observations = Array.from({ length: 120 }, (_, r) =>
+        rows.map((row, c) => {
+          const vol = Number(row.volatility) || 0.1;
+          const factor = Math.sin(r * 0.11) * 0.01;
+          return factor + Math.sin(r * 0.3 + c * 2.0) * vol * 0.05;
+        }),
+      );
+      return api.covariance(observations);
+    },
+  });
+
   const run = useMutation<OptimizeResponse, Error>({
     mutationFn: () =>
       api.optimize({
+        covariance: estimate.data?.covariance ?? [],
         optimizer,
         symbols: rows.map((r) => r.symbol),
         volatilities: rows.map((r) => Number(r.volatility)),
@@ -89,12 +107,32 @@ export default function OptimizationPage() {
           </button>
         </div>
 
-        {/* The engine's own requirements, surfaced before the request rather
-            than after a refusal. */}
-        {selected?.requires_covariance && (
-          <p className="mb-3 text-warn">
-            {optimizer} needs a covariance matrix; this form supplies only
-            volatilities, so the engine will refuse.
+        {/* The engine's own requirement, surfaced before the request -- and now
+            with a way to satisfy it rather than only a warning. */}
+        {selected?.requires_covariance && !estimate.data && (
+          <div className="mb-3 flex items-center gap-3">
+            <p className="text-warn">{optimizer} needs a covariance matrix.</p>
+            <button
+              onClick={() => estimate.mutate()}
+              disabled={estimate.isPending}
+              className="rounded border border-surface-border px-3 py-1 text-xs disabled:opacity-30"
+            >
+              {estimate.isPending ? "estimating…" : "Estimate covariance"}
+            </button>
+          </div>
+        )}
+        {estimate.data && (
+          <p className="mb-3 text-xs text-content-faint">
+            covariance from {estimate.data.observations} observations
+            {/* A degraded estimate must never be used unknowingly. */}
+            {estimate.data.degraded && (
+              <span className="ml-2 text-warn">
+                degraded — {estimate.data.degradation_reason}
+              </span>
+            )}
+            {estimate.data.psd_repaired && (
+              <span className="ml-2 text-warn">PSD repaired</span>
+            )}
           </p>
         )}
 

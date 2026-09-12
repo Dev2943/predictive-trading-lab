@@ -102,6 +102,7 @@ class SessionBackend(Protocol):
     def session_cancel_order(self, order_id: int) -> bool: ...
     def session_cancel_all(self) -> int: ...
     def session_flatten(self) -> int: ...
+    def session_set_halted(self, halted: bool) -> bool: ...
 
 
 @dataclass
@@ -199,6 +200,19 @@ class SessionDriver:
         command = _Command("flatten")
         self._submit(command)
         return int(command.result or 0)
+
+    def set_halted(self, halted: bool) -> bool:
+        """Suppress or resume strategy order generation.
+
+        A FLAG, not a lifecycle transition. The session stays RUNNING, data
+        keeps flowing and the book keeps marking -- halting is the control
+        between `flatten` (acts on the book) and `stop` (tears the session
+        down), which F6 left missing.
+        """
+        self._require_running("halt the strategy")
+        command = _Command("set_halted", {"halted": halted})
+        self._submit(command)
+        return bool(command.result)
 
     def _require_running(self, verb: str) -> None:
         """Trading commands need a RUNNING session.
@@ -320,6 +334,8 @@ class SessionDriver:
             command.result = self._backend.session_cancel_all()
         elif command.name == "flatten":
             command.result = self._backend.session_flatten()
+        elif command.name == "set_halted":
+            command.result = self._backend.session_set_halted(command.kwargs["halted"])
         else:  # pragma: no cover - unreachable by construction
             raise RuntimeError(f"unknown command '{command.name}'")
 

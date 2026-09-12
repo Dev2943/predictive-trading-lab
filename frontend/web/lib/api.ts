@@ -283,6 +283,48 @@ export interface BulkActionResponse {
   queued: number;
 }
 
+export interface RollingResponse {
+  window: number;
+  omega: number;
+  volatility: (number | null)[];
+  sharpe: (number | null)[];
+  var: (number | null)[];
+  cvar: (number | null)[];
+}
+
+export interface FactorResponse {
+  beta: number;
+  beta_contribution: number;
+  alpha_contribution: number;
+  residual_contribution: number;
+  portfolio_return: number;
+  benchmark_return: number;
+  periods: number;
+}
+
+export interface CovarianceResponse {
+  covariance: number[][];
+  correlation: number[][];
+  observations: number;
+  applied_shrinkage: number;
+  psd_repaired: boolean;
+  degraded: boolean;
+  degradation_reason: string;
+}
+
+export interface ArtifactList {
+  prefix: string;
+  keys: string[];
+  count: number;
+}
+
+export interface ArtifactEnvelope {
+  available: boolean;
+  key: string;
+  data: Record<string, unknown> | null;
+  detail: string;
+}
+
 export const api = {
   health: () => request<HealthResponse>("/health"),
   version: () => request<VersionInfo>("/version"),
@@ -295,6 +337,11 @@ export const api = {
   instruments: () => request<Instrument[]>("/session/instruments"),
 
   tradingMode: () => request<TradingMode>("/trading/mode"),
+  halt: (halted: boolean) =>
+    request<{ strategy_halted: boolean; detail: string }>("/trading/halt", {
+      method: "POST",
+      body: JSON.stringify({ halted }),
+    }),
   pendingOrders: () => request<PendingOrders>("/trading/pending"),
   orderHistory: () => request<OrderHistory>("/trading/orders"),
   submitOrder: (body: OrderRequest) =>
@@ -307,6 +354,26 @@ export const api = {
   cancelAll: () =>
     request<BulkActionResponse>("/trading/cancel-all", { method: "POST" }),
   flatten: () => request<BulkActionResponse>("/trading/flatten", { method: "POST" }),
+
+  rolling: (returns: number[], window: number) =>
+    request<RollingResponse>("/analytics/rolling", {
+      method: "POST",
+      body: JSON.stringify({ returns, window }),
+    }),
+  factors: (portfolio: number[], benchmark: number[]) =>
+    request<FactorResponse>("/analytics/attribution/factors", {
+      method: "POST",
+      body: JSON.stringify({ portfolio, benchmark }),
+    }),
+  covariance: (observations: number[][], method = "shrinkage") =>
+    request<CovarianceResponse>("/optimization/covariance", {
+      method: "POST",
+      body: JSON.stringify({ observations, method }),
+    }),
+  artifacts: (prefix = "") =>
+    request<ArtifactList>(`/artifacts?prefix=${encodeURIComponent(prefix)}`),
+  diagnostics: () => request<ArtifactEnvelope>("/diagnostics"),
+  reports: () => request<ArtifactList>("/reports"),
 
   optimizers: () => request<OptimizationCapabilities>("/optimization"),
   optimize: (body: OptimizeRequest) =>

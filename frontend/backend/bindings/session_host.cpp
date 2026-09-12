@@ -117,6 +117,13 @@ public:
         drain(bar, sink);
 
         ++bars_;
+        // HALT SUPPRESSES GENERATION, NOT THE BAR COUNT.
+        //
+        // The counter still advances, so resuming does not hand the strategy a
+        // burst of signals it "missed" -- it simply rejoins the schedule where
+        // the market is now. Freezing the counter would make a halt change what
+        // the strategy does after it, which a halt must not do.
+        if (halted_) return;
         if (bars_ % 15 != 0) return;
 
         const bool holding = ctx.position_of(bar.instrument()).get() > 0.0;
@@ -171,6 +178,9 @@ public:
     };
 
     void enqueue(Request request) { inbox_.push_back(std::move(request)); }
+
+    void set_halted(bool halted) noexcept { halted_ = halted; }
+    [[nodiscard]] bool halted() const noexcept { return halted_; }
     [[nodiscard]] std::size_t pending() const noexcept { return inbox_.size(); }
 
     /// Order ids this session has submitted, manual and automatic alike, in
@@ -274,6 +284,7 @@ public:
 private:
     static constexpr std::size_t kMaxFills = 200;
     static constexpr std::size_t kMaxOutcomes = 200;
+    bool                         halted_ = false;
     std::deque<Request>          inbox_;
     std::vector<std::uint64_t>   submitted_;
     std::deque<Outcome>          outcomes_;
@@ -536,6 +547,8 @@ std::string PaperSessionHost::state_json() const {
         ss << ", \"phase\": \"" << ptl::paper::to_string(impl_->session->phase())
            << "\", \"trading_permitted\": "
            << (impl_->session->trading_permitted() ? "true" : "false")
+           << ", \"strategy_halted\": "
+           << (impl_->strategy.halted() ? "true" : "false")
            << ", \"events_processed\": " << stats.events_processed
            << ", \"orders_submitted\": " << stats.orders_submitted
            << ", \"orders_rejected\": " << stats.orders_rejected
@@ -724,6 +737,14 @@ ptl::Result<bool> PaperSessionHost::enqueue_cancel(std::uint64_t order_id) {
     queued.cancel_target = order_id;
     impl_->strategy.enqueue(std::move(queued));
     return true;
+}
+
+void PaperSessionHost::set_strategy_halted(bool halted) noexcept {
+    if (impl_) impl_->strategy.set_halted(halted);
+}
+
+bool PaperSessionHost::strategy_halted() const noexcept {
+    return impl_ && impl_->strategy.halted();
 }
 
 ptl::Result<std::size_t> PaperSessionHost::enqueue_cancel_all() {

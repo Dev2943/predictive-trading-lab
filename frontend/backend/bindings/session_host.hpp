@@ -171,6 +171,25 @@ public:
     /// Queue a cancel for a working order.
     [[nodiscard]] ptl::Result<bool> enqueue_cancel(std::uint64_t order_id);
 
+    /// Suppress or resume strategy order generation.
+    ///
+    /// WHY THIS EXISTS, AND WHY IT IS NOT flatten OR stop.
+    ///
+    /// F6 left a gap between two controls operating at different levels.
+    /// `flatten` acts on the BOOK -- close what is held -- and `stop` acts on
+    /// the SESSION -- tear everything down. Nothing acted on the STRATEGY.
+    ///
+    /// An operator who wants to stop generating orders while keeping data
+    /// flowing, the book marked and positions valued had only one option:
+    /// destroy the session, losing the book with it. That is the wrong remedy
+    /// for "the model is behaving oddly, hold on a moment".
+    ///
+    /// Halting suppresses only the strategy's OWN order generation. Manual
+    /// orders still work, fills still arrive, the portfolio still marks, and
+    /// the replay keeps advancing -- so the equity curve has no hole in it.
+    void set_strategy_halted(bool halted) noexcept;
+    [[nodiscard]] bool strategy_halted() const noexcept;
+
     /// Queue cancels for every working order.
     [[nodiscard]] ptl::Result<std::size_t> enqueue_cancel_all();
 

@@ -105,6 +105,8 @@ def test_only_the_intended_surface_is_exposed():
         "session_cancel_order",
         "session_flatten",
         "session_submit_order",
+        # F7. Halt is a flag on the host, still a free function over plain data.
+        "session_set_halted",
     }
 
 

@@ -49,7 +49,14 @@ COMPUTE_POSTS = {
 }
 # F6. Trading commands mutate session state, but only by enqueuing onto the
 # driver -- never by touching the engine from a request thread.
-TRADING_POSTS = {"/trading/orders", "/trading/cancel-all", "/trading/flatten"}
+TRADING_POSTS = {
+    "/trading/orders",
+    "/trading/cancel-all",
+    "/trading/flatten",
+    # F7. Halt suppresses strategy generation. It is a trading command, not a
+    # lifecycle one: the session stays RUNNING throughout.
+    "/trading/halt",
+}
 TRADING_DELETES = {"/trading/orders/{order_id}"}
 
 

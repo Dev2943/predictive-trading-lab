@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { Nav } from "@/components/nav";
+import { SessionBar } from "@/components/session-bar";
 import { Providers } from "./providers";
 
 export const metadata: Metadata = {
@@ -18,6 +19,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <h1 className="text-lg">Predictive Trading Lab</h1>
             </header>
             <Nav />
+            <div className="mb-4">
+              <SessionBar />
+            </div>
             {children}
           </div>
         </Providers>

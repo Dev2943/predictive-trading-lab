@@ -80,11 +80,21 @@ export default function TradingPage() {
   });
   const cancelAll = useMutation({ mutationFn: api.cancelAll, onSettled: invalidate });
   const flatten = useMutation({ mutationFn: api.flatten, onSettled: invalidate });
+  const halt = useMutation({
+    mutationFn: (halted: boolean) => api.halt(halted),
+    onSettled: () => {
+      invalidate();
+      void queryClient.invalidateQueries({ queryKey: ["session"] });
+    },
+  });
 
   const running = session.data?.state === "RUNNING";
   const busy = submit.isPending || cancelAll.isPending || flatten.isPending;
+  const halted = session.data?.engine?.strategy_halted === true;
   const lastError =
-    (submit.error ?? cancelAll.error ?? flatten.error ?? cancel.error) as Error | null;
+    (submit.error ?? cancelAll.error ?? flatten.error ?? cancel.error ?? halt.error) as
+      | Error
+      | null;
 
   const working = (history.data?.orders ?? []).filter((o) =>
     ["working", "partially_filled", "pending_new", "new"].includes(o.state),
@@ -113,12 +123,28 @@ export default function TradingPage() {
             {session.data?.state ?? "—"}
           </div>
         </div>
+        {halted && (
+          <div className="text-warn">
+            strategy halted — data, marking and manual orders continue
+          </div>
+        )}
         {(pending.data?.pending ?? 0) > 0 && (
           <div className="text-content-faint">
             {pending.data?.pending} queued — submitted at the next market event
           </div>
         )}
         <div className="ml-auto flex gap-2">
+          {/* The control between flatten and stop: suppresses the strategy
+              while the session keeps running and the book keeps marking. */}
+          <button
+            onClick={() => halt.mutate(!halted)}
+            disabled={!running || halt.isPending}
+            className={`rounded border px-3 py-1 disabled:opacity-30 ${
+              halted ? "border-warn/60 text-warn" : "border-surface-border"
+            }`}
+          >
+            {halted ? "Resume strategy" : "Halt strategy"}
+          </button>
           <button
             onClick={() => cancelAll.mutate()}
             disabled={!running || busy}

@@ -282,17 +282,6 @@ def _run_until_idle(driver, seconds: float = 10.0) -> None:
             return
         _time.sleep(0.02)
 
-def _wait_for(predicate, timeout: float = 15.0, interval: float = 0.02) -> None:
-    import time as _time
-
-    deadline = _time.monotonic() + timeout
-
-    while _time.monotonic() < deadline:
-        if predicate():
-            return
-        _time.sleep(interval)
-
-    raise AssertionError("Timed out waiting for condition")
 
 def test_a_manual_order_traverses_the_real_risk_gate_and_fills():
     """The claim F6 rests on: one submission path.
@@ -394,67 +383,88 @@ def test_an_unknown_symbol_is_refused_rather_than_interned():
         driver.shutdown()
 
 
-def test_flatten_closes_every_position_it_found():
-    """Flatten closes the positions that exist when it is called.
+def _wait_for(driver, predicate, seconds: float, what: str):
+    """Poll until a CONDITION holds, rather than sleeping and hoping.
 
-    Flatten is a position-level operation, not a strategy kill switch. The
-    replay continues afterwards, so the demo strategy may legitimately open a
-    new position later.
+    A fixed sleep encodes an assumption about how fast the replay runs and how
+    soon the strategy happens to trade. Neither is a property of flatten, and
+    both vary with machine load.
     """
+    import time as _time
 
+    deadline = _time.monotonic() + seconds
+    while _time.monotonic() < deadline:
+        value = predicate()
+        if value:
+            return value
+        _time.sleep(0.01)
+    raise AssertionError(f"timed out waiting for {what}")
+
+
+def test_flatten_closes_every_position_it_found():
+    """Verifies FLATTEN'S CONTRACT: close what is held *now*.
+
+    Flatten is a position-level control, not a kill switch. It does not — and
+    must not — suppress the strategy: that would make it a second Stop Session
+    with no defined way to resume. The emergency sequence is flatten, then stop.
+
+    So the final position of a still-running replay is NOT the thing to assert.
+    The demo strategy re-opens on its next signal bar, which is correct
+    behaviour and has nothing to do with whether flatten worked.
+
+    What flatten promises, and what this asserts: for every position open when
+    it was called, an offsetting order of the exact held quantity was submitted
+    and filled.
+    """
     from app.engine import SessionDriver
 
     driver = SessionDriver(ptl, step_size=1)
-
     try:
         driver.start(session_id="flatten", seed=20240101, bars=390)
 
-        request_id = driver.submit_order(
-            symbol="SPY",
-            side=1,
-            quantity=10,
-            type="market",
-            limit_price=0.0,
-            stop_price=0.0,
-            time_in_force="day",
+        # A distinctive quantity, so the flatten order is unambiguously
+        # identifiable: the demo strategy only ever trades 25.
+        held = 30.0
+        driver.submit_order(
+            symbol="SPY", side=1, quantity=held, type="market",
+            limit_price=0.0, stop_price=0.0, time_in_force="day",
         )
-
-        _wait_for(
-            lambda: any(
-                outcome["request_id"] == request_id
-                for outcome in driver.snapshot()["pending"]["outcomes"]
-            )
+        opened = _wait_for(
+            driver,
+            lambda: [
+                p
+                for p in driver.snapshot()["positions"]["positions"]
+                if p["quantity"] >= held
+            ],
+            15.0,
+            "the manual order to open a position",
         )
-
-        _wait_for(
-            lambda: bool(driver.snapshot()["positions"]["positions"])
-        )
-
-        assert driver.snapshot()["positions"]["positions"], "no position to flatten"
+        assert opened, "no position to flatten"
 
         queued = driver.flatten()
+        assert queued >= 1, "flatten queued no closing orders"
 
-        assert queued >= 1
-
-        _run_until_idle(driver, 15.0)
-
-        history = driver.snapshot()["order_history"]["orders"]
-
-        closing_orders = [
-            order
-            for order in history
-            if order["side"] == -1
-            and order["type"] == "market"
-            and order["state"] == "filled"
-        ]
-
-        assert closing_orders, "flatten never produced a filled closing order"
+        # The offsetting order: opposite side, the exact quantity held, filled.
+        closing = _wait_for(
+            driver,
+            lambda: [
+                o
+                for o in driver.snapshot()["order_history"]["orders"]
+                if o["side"] == -1
+                and o["quantity"] == held
+                and o["state"] == "filled"
+                and o["filled"] == held
+            ],
+            15.0,
+            "the flatten order to fill",
+        )
+        assert closing, "flatten did not close the position it found"
 
         driver.stop()
-
     finally:
         driver.shutdown()
-        
+
+
 def test_trading_commands_do_not_perturb_determinism():
     """Given the SAME command sequence, two runs agree exactly.
 
@@ -517,3 +527,143 @@ def test_an_order_queued_after_the_replay_ends_stays_pending():
         driver.stop()
     finally:
         driver.shutdown()
+
+
+# ---------------------------------------------------------------------------
+# F7: halt against the real engine
+# ---------------------------------------------------------------------------
+
+
+def test_halting_stops_strategy_orders_but_not_the_session():
+    """The claim F7's halt rests on.
+
+    While halted the strategy must generate nothing, yet the session must keep
+    running, keep processing events and keep marking the book -- otherwise the
+    equity curve would have a hole in it and halting would be indistinguishable
+    from stopping.
+    """
+    from app.engine import SessionDriver, SessionState
+
+    driver = SessionDriver(ptl, step_size=1)
+    try:
+        driver.start(session_id="halt", seed=20240101, bars=390)
+
+        # Let the strategy trade, then halt.
+        first = _wait_for(
+            driver,
+            lambda: driver.snapshot()["state"].get("orders_submitted", 0) >= 2,
+            15.0,
+            "the strategy to submit orders",
+        )
+        assert first
+
+        assert driver.set_halted(True) is True
+        assert driver.state is SessionState.RUNNING
+
+        # THE BASELINE IS TAKEN AFTER THE HALT TAKES EFFECT, not before.
+        #
+        # Events keep flowing between reading a count and the halt being
+        # applied, so a baseline captured beforehand includes orders the
+        # strategy submitted legitimately while still running -- and they would
+        # then read as a halt violation.
+        halted_snapshot = _wait_for(
+            driver,
+            lambda: (
+                driver.snapshot()["state"]
+                if driver.snapshot()["state"].get("strategy_halted")
+                else None
+            ),
+            10.0,
+            "the halt to be reflected in the published snapshot",
+        )
+        at_halt = halted_snapshot["orders_submitted"]
+        events_at_halt = halted_snapshot["events_processed"]
+
+        # Events must keep flowing while halted.
+        _wait_for(
+            driver,
+            lambda: driver.snapshot()["state"]["events_processed"] > events_at_halt + 30,
+            15.0,
+            "events to continue while halted",
+        )
+        # ONE snapshot, and confirm it is OUR session before comparing counters.
+        #
+        # The C++ host is a process singleton, so a driver thread lingering from
+        # another test can replace the session underneath this one. Reading
+        # counters from a session we did not start would produce a confusing
+        # mismatch instead of naming the real problem.
+        observed = driver.snapshot()["state"]
+        assert observed["session_id"] == "halt", (
+            f"the host is running session '{observed['session_id']}', not ours"
+        )
+        assert observed["orders_submitted"] == at_halt, (
+            "the strategy generated orders while halted"
+        )
+        assert observed["strategy_halted"] is True
+
+        # And resuming restores generation.
+        assert driver.set_halted(False) is False
+        _wait_for(
+            driver,
+            lambda: driver.snapshot()["state"]["orders_submitted"] > at_halt,
+            15.0,
+            "the strategy to resume",
+        )
+
+        driver.stop()
+    finally:
+        driver.shutdown()
+
+
+def test_a_manual_order_is_accepted_while_the_strategy_is_halted():
+    from app.engine import SessionDriver
+
+    driver = SessionDriver(ptl, step_size=1)
+    try:
+        driver.start(session_id="halt-manual", seed=20240101, bars=390)
+        driver.set_halted(True)
+
+        driver.submit_order(
+            symbol="SPY", side=1, quantity=12, type="market",
+            limit_price=0.0, stop_price=0.0, time_in_force="day",
+        )
+        filled = _wait_for(
+            driver,
+            lambda: [
+                o
+                for o in driver.snapshot()["order_history"]["orders"]
+                if o["quantity"] == 12.0 and o["state"] == "filled"
+            ],
+            15.0,
+            "the manual order to fill while halted",
+        )
+        assert filled
+        driver.stop()
+    finally:
+        driver.shutdown()
+
+
+def test_halting_does_not_perturb_determinism():
+    """Given the same halt/resume sequence at the same points, runs agree."""
+
+    def run() -> dict:
+        from app.engine import SessionDriver
+
+        driver = SessionDriver(ptl, step_size=50)
+        try:
+            driver.start(session_id="halt-det", seed=99, bars=200)
+            driver.set_halted(True)
+            driver.set_halted(False)
+            _run_until_idle(driver)
+            snapshot = driver.snapshot()
+            result = {
+                "orders": snapshot["state"]["orders_submitted"],
+                "fills": snapshot["state"]["fills_received"],
+                "equity": snapshot["portfolio"]["account"]["equity"],
+            }
+            driver.stop()
+            return result
+        finally:
+            driver.shutdown()
+
+    assert run() == run()

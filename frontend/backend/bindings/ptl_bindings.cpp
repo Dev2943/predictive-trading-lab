@@ -451,6 +451,11 @@ template <typename T>
     return unwrap(host().enqueue_flatten(), "flatten");
 }
 
+[[nodiscard]] bool host_set_halted(bool halted) {
+    host().set_strategy_halted(halted);
+    return host().strategy_halted();
+}
+
 }  // namespace
 
 PYBIND11_MODULE(ptl, m) {
@@ -528,6 +533,12 @@ PYBIND11_MODULE(ptl, m) {
     m.def("session_flatten", &host_flatten,
           "Cancel everything working, then queue market orders closing every "
           "open position. Paper only.");
+
+    // One more function. Halt is a FLAG on the host, not a lifecycle state:
+    // the session keeps running, data keeps flowing and the book keeps marking.
+    m.def("session_set_halted", &host_set_halted, py::arg("halted"),
+          "Suppress or resume strategy order generation. Manual orders and "
+          "fills are unaffected.");
 
     m.def("session_state", []() { return host().state_json(); },
           "Lifecycle state and counters, as JSON.");

@@ -20,6 +20,8 @@ from ..dependencies import Driver
 from ..engine import IllegalTransition
 from ..models.schemas import (
     BulkActionResponse,
+    HaltRequest,
+    HaltResponse,
     ErrorDetail,
     OrderAccepted,
     OrderHistory,
@@ -156,6 +158,38 @@ def flatten(driver: Driver) -> BulkActionResponse:
             status_code=status.HTTP_409_CONFLICT, detail=str(exc)
         ) from exc
     return BulkActionResponse(action="flatten", queued=queued)
+
+
+@router.post(
+    "/halt",
+    response_model=HaltResponse,
+    responses=_CONFLICT,
+    summary="Suppress or resume strategy order generation",
+    description=(
+        "The control between `flatten` and `stop`.\n\n"
+        "`flatten` acts on the book — close what is held. `stop` tears the "
+        "session down and loses it. Halting acts on the **strategy**: it stops "
+        "generating orders while the session keeps running, data keeps "
+        "flowing, the book keeps marking and manual orders still work.\n\n"
+        "Without it, an operator who wanted the model to pause had to destroy "
+        "the session, which is the wrong remedy for 'hold on a moment'."
+    ),
+)
+def halt(request: HaltRequest, driver: Driver) -> HaltResponse:
+    try:
+        halted = driver.set_halted(request.halted)
+    except IllegalTransition as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
+    return HaltResponse(
+        strategy_halted=halted,
+        detail=(
+            "strategy suppressed; data, marking and manual orders continue"
+            if halted
+            else "strategy resumed"
+        ),
+    )
 
 
 @router.get(
