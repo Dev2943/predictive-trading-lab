@@ -233,6 +233,56 @@ export interface ValidationResponse {
   issues: ValidationIssue[];
 }
 
+export interface TradingMode {
+  mode: "PAPER" | "LIVE";
+  live_available: boolean;
+  label: string;
+  detail: string;
+}
+
+export interface OrderRequest {
+  symbol: string;
+  side: 1 | -1;
+  quantity: number;
+  type: "market" | "limit" | "stop" | "stop_limit";
+  limit_price?: number;
+  stop_price?: number;
+  time_in_force?: "day" | "ioc" | "fok" | "gtc";
+}
+
+export interface OrderOutcome {
+  request_id: number;
+  order_id: number;
+  accepted: boolean;
+  detail: string;
+}
+
+export interface PendingOrders {
+  pending: number;
+  outcomes: OrderOutcome[];
+}
+
+export interface OrderHistoryEntry {
+  order_id: number;
+  symbol: string;
+  state: string;
+  side: number;
+  type: string;
+  quantity: number;
+  filled: number;
+  reject_reason: string;
+}
+
+export interface OrderHistory {
+  available: boolean;
+  orders: OrderHistoryEntry[];
+}
+
+export interface BulkActionResponse {
+  action: string;
+  queued: number;
+}
+
 export const api = {
   health: () => request<HealthResponse>("/health"),
   version: () => request<VersionInfo>("/version"),
@@ -243,6 +293,20 @@ export const api = {
   session: () => request<SessionStatus>("/session"),
   history: () => request<EquityHistory>("/session/history"),
   instruments: () => request<Instrument[]>("/session/instruments"),
+
+  tradingMode: () => request<TradingMode>("/trading/mode"),
+  pendingOrders: () => request<PendingOrders>("/trading/pending"),
+  orderHistory: () => request<OrderHistory>("/trading/orders"),
+  submitOrder: (body: OrderRequest) =>
+    request<{ request_id: number; queued: boolean; detail: string }>("/trading/orders", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  cancelOrder: (orderId: number) =>
+    request<BulkActionResponse>(`/trading/orders/${orderId}`, { method: "DELETE" }),
+  cancelAll: () =>
+    request<BulkActionResponse>("/trading/cancel-all", { method: "POST" }),
+  flatten: () => request<BulkActionResponse>("/trading/flatten", { method: "POST" }),
 
   optimizers: () => request<OptimizationCapabilities>("/optimization"),
   optimize: (body: OptimizeRequest) =>

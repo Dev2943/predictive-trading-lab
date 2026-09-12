@@ -12,6 +12,7 @@ import { usePathname } from "next/navigation";
  */
 const LINKS = [
   { href: "/", label: "Dashboard" },
+  { href: "/trading", label: "Trading" },
   { href: "/optimization", label: "Optimization" },
   { href: "/risk", label: "Risk" },
 ];

@@ -1066,6 +1066,238 @@
         }
       }
     },
+    "/trading/mode": {
+      "get": {
+        "tags": [
+          "trading"
+        ],
+        "summary": "Which venue the session trades against",
+        "description": "Always PAPER today. No live broker is connected and none is simulated \u2014 `live_available` stays false until a real adapter exists, so an interface cannot accidentally present paper fills as live ones.",
+        "operationId": "mode_trading_mode_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TradingMode"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/trading/orders": {
+      "get": {
+        "tags": [
+          "trading"
+        ],
+        "summary": "Every order this session has seen",
+        "description": "Working, filled, cancelled and rejected, most recent first. The OMS exposes only working orders, so the host tracks submitted ids to keep terminal orders in the blotter rather than letting them vanish on fill.",
+        "operationId": "orders_trading_orders_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderHistory"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "trading"
+        ],
+        "summary": "Submit an order",
+        "description": "Queues the order. It reaches the engine at the next market event and passes the same risk gate a strategy's order does, so a 200 here means *accepted for submission*, not filled.\n\nPoll `/trading/pending` for the outcome, matched by `request_id`.",
+        "operationId": "submit_trading_orders_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderAccepted"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "No running session, or the lifecycle forbids this.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The engine refused, and says why.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/trading/orders/{order_id}": {
+      "delete": {
+        "tags": [
+          "trading"
+        ],
+        "summary": "Cancel one order",
+        "description": "DELETE because it removes a working order. Like a submission it is queued and applied at the next event: the order is cancelled when the engine says so, not when this returns.",
+        "operationId": "cancel_trading_orders__order_id__delete",
+        "parameters": [
+          {
+            "name": "order_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Order Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkActionResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "No running session, or the lifecycle forbids this.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The engine refused, and says why.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/trading/cancel-all": {
+      "post": {
+        "tags": [
+          "trading"
+        ],
+        "summary": "Cancel every working order",
+        "operationId": "cancel_all_trading_cancel_all_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkActionResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "No running session, or the lifecycle forbids this.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/trading/flatten": {
+      "post": {
+        "tags": [
+          "trading"
+        ],
+        "summary": "Cancel everything and close every position",
+        "description": "Cancels working orders first, then queues market orders closing each open position. The order matters: closing while an order still works could leave the book flat and an order live, which would re-open the position the caller asked to eliminate.\n\n**Paper only**, enforced in the host rather than by a disabled button.",
+        "operationId": "flatten_trading_flatten_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkActionResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "No running session, or the lifecycle forbids this.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/trading/pending": {
+      "get": {
+        "tags": [
+          "trading"
+        ],
+        "summary": "Queued requests and their outcomes",
+        "description": "Served from the published snapshot. `outcomes` reports what happened to each request once the engine saw it, including a risk rejection \u2014 an order that vanished silently would leave the user believing it was live.",
+        "operationId": "pending_trading_pending_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PendingOrders"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/": {
       "get": {
         "tags": [
@@ -1307,6 +1539,29 @@
           "count"
         ],
         "title": "ArtifactList"
+      },
+      "BulkActionResponse": {
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "cancel_all",
+              "flatten"
+            ],
+            "title": "Action"
+          },
+          "queued": {
+            "type": "integer",
+            "title": "Queued",
+            "description": "Requests enqueued, not orders completed."
+          }
+        },
+        "type": "object",
+        "required": [
+          "action",
+          "queued"
+        ],
+        "title": "BulkActionResponse"
       },
       "CovarianceRequest": {
         "properties": {
@@ -2231,6 +2486,232 @@
         ],
         "title": "OptimizerInfo"
       },
+      "OrderAccepted": {
+        "properties": {
+          "request_id": {
+            "type": "integer",
+            "title": "Request Id"
+          },
+          "queued": {
+            "type": "boolean",
+            "title": "Queued",
+            "default": true
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "default": "queued; submitted at the next market event"
+          }
+        },
+        "type": "object",
+        "required": [
+          "request_id"
+        ],
+        "title": "OrderAccepted",
+        "description": "The order was QUEUED, not filled.\n\nIt reaches the engine at the next event and faces the risk gate there, so\nacceptance here is not acceptance by the venue. `request_id` matches the\noutcome that appears once it has been through."
+      },
+      "OrderHistory": {
+        "properties": {
+          "available": {
+            "type": "boolean",
+            "title": "Available"
+          },
+          "orders": {
+            "items": {
+              "$ref": "#/components/schemas/OrderHistoryEntry"
+            },
+            "type": "array",
+            "title": "Orders",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "available"
+        ],
+        "title": "OrderHistory"
+      },
+      "OrderHistoryEntry": {
+        "properties": {
+          "order_id": {
+            "type": "integer",
+            "title": "Order Id"
+          },
+          "symbol": {
+            "type": "string",
+            "title": "Symbol"
+          },
+          "state": {
+            "type": "string",
+            "title": "State",
+            "description": "OMS state: working, filled, cancelled, rejected\u2026"
+          },
+          "side": {
+            "type": "integer",
+            "title": "Side"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "quantity": {
+            "type": "number",
+            "title": "Quantity"
+          },
+          "filled": {
+            "type": "number",
+            "title": "Filled"
+          },
+          "reject_reason": {
+            "type": "string",
+            "title": "Reject Reason",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "order_id",
+          "symbol",
+          "state",
+          "side",
+          "type",
+          "quantity",
+          "filled"
+        ],
+        "title": "OrderHistoryEntry"
+      },
+      "OrderOutcome": {
+        "properties": {
+          "request_id": {
+            "type": "integer",
+            "title": "Request Id"
+          },
+          "order_id": {
+            "type": "integer",
+            "title": "Order Id"
+          },
+          "accepted": {
+            "type": "boolean",
+            "title": "Accepted"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "The engine's rejection reason when not accepted.",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "request_id",
+          "order_id",
+          "accepted"
+        ],
+        "title": "OrderOutcome"
+      },
+      "OrderRequest": {
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Symbol",
+            "description": "Must be an instrument the session trades."
+          },
+          "side": {
+            "type": "integer",
+            "enum": [
+              1,
+              -1
+            ],
+            "title": "Side",
+            "description": "1 buy, -1 sell."
+          },
+          "quantity": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Quantity"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "market",
+              "limit",
+              "stop",
+              "stop_limit"
+            ],
+            "title": "Type",
+            "default": "market"
+          },
+          "limit_price": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Limit Price",
+            "default": 0.0
+          },
+          "stop_price": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Stop Price",
+            "default": 0.0
+          },
+          "time_in_force": {
+            "type": "string",
+            "enum": [
+              "day",
+              "ioc",
+              "fok",
+              "gtc"
+            ],
+            "title": "Time In Force",
+            "default": "day"
+          }
+        },
+        "type": "object",
+        "required": [
+          "symbol",
+          "side",
+          "quantity"
+        ],
+        "title": "OrderRequest",
+        "examples": [
+          {
+            "limit_price": 505.0,
+            "quantity": 50,
+            "side": 1,
+            "symbol": "SPY",
+            "type": "limit"
+          },
+          {
+            "quantity": 25,
+            "side": -1,
+            "symbol": "SPY",
+            "type": "market"
+          }
+        ]
+      },
+      "PendingOrders": {
+        "properties": {
+          "pending": {
+            "type": "integer",
+            "title": "Pending",
+            "description": "Requests not yet submitted to the engine."
+          },
+          "outcomes": {
+            "items": {
+              "$ref": "#/components/schemas/OrderOutcome"
+            },
+            "type": "array",
+            "title": "Outcomes",
+            "description": "Most recent first.",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "pending"
+        ],
+        "title": "PendingOrders"
+      },
       "PortfolioResponse": {
         "properties": {
           "available": {
@@ -2790,6 +3271,40 @@
         "title": "SystemInfo",
         "description": "Everything a status header needs, in one call.\n\nAggregated so a client does not fan out three requests to render one bar."
       },
+      "TradingMode": {
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "PAPER",
+              "LIVE"
+            ],
+            "title": "Mode",
+            "default": "PAPER"
+          },
+          "live_available": {
+            "type": "boolean",
+            "title": "Live Available",
+            "default": false
+          },
+          "label": {
+            "type": "string",
+            "title": "Label",
+            "description": "\"PAPER\" or \"LIVE (not connected)\"."
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "label"
+        ],
+        "title": "TradingMode",
+        "description": "Which venue the session is trading against.\n\nSurfaced so the interface can label it unambiguously. There is no live\nbroker connection and none is simulated: `live_available` is false and stays\nfalse until a real adapter exists."
+      },
       "ValidationError": {
         "properties": {
           "loc": {
@@ -2957,6 +3472,10 @@
     {
       "name": "artifacts",
       "description": "State a session previously persisted."
+    },
+    {
+      "name": "trading",
+      "description": "Order entry and management. Every command is queued through the session driver and reaches the engine at the next event."
     },
     {
       "name": "compute",
