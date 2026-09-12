@@ -317,6 +317,37 @@ export interface CovarianceResponse {
   degradation_reason: string;
 }
 
+export interface MarketQuote {
+  symbol: string;
+  bid: number | null;
+  ask: number | null;
+  last: number | null;
+  volume: number | null;
+  ts: string | null;
+  source: "replay" | "live";
+  spread_value: number | null;
+  spread_bps: number | null;
+}
+
+export interface MarketStatus {
+  mode: "replay" | "live";
+  connected: boolean;
+  provider: string;
+  detail: string;
+  symbols: string[];
+  last_update: string | null;
+}
+
+export interface MarketFrame {
+  status: MarketStatus;
+  quotes: MarketQuote[];
+}
+
+/** The stream URL, derived from the API base so one setting moves both. */
+export function marketStreamUrl(): string {
+  return `${BASE.replace(/^http/, "ws")}/market/stream`;
+}
+
 export const api = {
   /** One request for a status header, rather than three. */
   system: () => request<SystemInfo>("/system"),
@@ -324,6 +355,15 @@ export const api = {
   session: () => request<SessionStatus>("/session"),
 
   tradingMode: () => request<TradingMode>("/trading/mode"),
+  marketStatus: () => request<MarketStatus>("/market/status"),
+  marketQuotes: () => request<MarketQuote[]>("/market/quotes"),
+  setMarketMode: (mode: "replay" | "live") =>
+    request<MarketStatus>(`/market/mode/${mode}`, { method: "POST" }),
+  setWatchlist: (symbols: string[]) =>
+    request<MarketStatus>("/market/watchlist", {
+      method: "POST",
+      body: JSON.stringify({ symbols }),
+    }),
   halt: (halted: boolean) =>
     request<{ strategy_halted: boolean; detail: string }>("/trading/halt", {
       method: "POST",
