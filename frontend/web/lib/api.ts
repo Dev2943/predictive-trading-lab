@@ -15,7 +15,23 @@
  * visualises what the API returns.
  */
 
-const BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
+/**
+ * The API origin.
+ *
+ * `NEXT_PUBLIC_*` values are inlined at BUILD time, not read at runtime, so a
+ * deployed bundle carries whatever was set when it was built. Changing the
+ * backend URL therefore requires a rebuild — stated here because "why is it
+ * still pointing at the old API" is otherwise a long afternoon.
+ *
+ * The localhost fallback applies only when the variable is unset, which in a
+ * correct deployment never happens. It is kept so `npm run dev` works with no
+ * configuration at all.
+ */
+export const API_BASE = (
+  process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000"
+).replace(/\/$/, "");
+
+const BASE = API_BASE;
 
 export class ApiError extends Error {
   constructor(
@@ -345,6 +361,9 @@ export interface MarketFrame {
 
 /** The stream URL, derived from the API base so one setting moves both. */
 export function marketStreamUrl(): string {
+  // Derived from the API origin so one setting moves both, and so https
+  // deployments get wss rather than a mixed-content failure that browsers
+  // report only in the console.
   return `${BASE.replace(/^http/, "ws")}/market/stream`;
 }
 
@@ -382,6 +401,8 @@ export const api = {
 
   session: () => request<SessionStatus>("/session"),
 
+  /** Liveness. Cheap, and deliberately does not touch the engine. */
+  healthz: () => request<{ status: string; uptime_seconds: number }>("/healthz"),
   tradingMode: () => request<TradingMode>("/trading/mode"),
   marketStatus: () => request<MarketStatus>("/market/status"),
   marketQuotes: () => request<MarketQuote[]>("/market/quotes"),

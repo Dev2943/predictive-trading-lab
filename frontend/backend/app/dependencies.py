@@ -113,3 +113,23 @@ def get_market() -> MarketDataService:
 
 
 Market = Annotated[MarketDataService, Depends(get_market)]
+
+
+def shutdown_services() -> None:
+    """Release background resources on shutdown.
+
+    Called from the application lifespan. Without it, a container restart
+    leaves the session driver thread stepping a session nobody is reading and
+    the market data socket open until the process is killed.
+
+    Each is guarded separately: a failure closing one must not prevent the
+    others from closing.
+    """
+    for close in (
+        lambda: _driver.cache_info() and _driver().shutdown(),
+        lambda: _market.cache_info() and _market().close(),
+    ):
+        try:
+            close()
+        except Exception:  # noqa: BLE001 - shutdown is best-effort by nature
+            pass

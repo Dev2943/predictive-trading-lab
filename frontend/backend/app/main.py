@@ -11,8 +11,25 @@ alone.
 
 from __future__ import annotations
 
+import contextlib
+import logging
+import os
+import time
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+from .observability import RequestIdMiddleware, configure_logging
+from .settings import load_settings
+
+# Resolved ONCE at import, before the app exists. A configuration error must
+# stop the process rather than surface as a 500 on the first request -- a
+# process that starts and then fails every call still looks healthy to a load
+# balancer's TCP check.
+settings = load_settings()
+log = configure_logging(settings.log_level)
+
+STARTED_AT = time.time()
 
 from .routers import (
     artifacts,
@@ -24,7 +41,30 @@ from .routers import (
     trading,
 )
 
+@contextlib.asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Startup banner and graceful shutdown.
+
+    The banner prints the resolved configuration -- never a secret -- so a
+    deployment's actual settings are visible in the first log line rather than
+    inferred from behaviour.
+    """
+    log.info(
+        "gateway starting",
+        extra={"extra_fields": {"config": settings.describe()}},
+    )
+    yield
+    # Stop the session driver and the market stream in order. Without this a
+    # container restart leaves a driver thread stepping a session nobody is
+    # reading, and the market socket open.
+    from .dependencies import shutdown_services
+
+    shutdown_services()
+    log.info("gateway stopped")
+
+
 app = FastAPI(
+    lifespan=lifespan,
     title="Predictive Trading Lab API",
     version=system.GATEWAY_VERSION,
     summary="Read-only gateway over the Predictive Trading Lab C++ engine.",
@@ -82,9 +122,13 @@ app = FastAPI(
 
 # Restricted to the Next.js dev origin rather than "*": a wildcard on an API
 # that will later place orders is a habit worth not forming.
+app.add_middleware(RequestIdMiddleware)
+
+# Origins come from configuration, never a literal. In production the settings
+# validator refuses localhost and refuses "*".
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=settings.allowed_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["*"],
@@ -99,11 +143,73 @@ app.include_router(trading.router)
 app.include_router(market.router)
 
 
+@app.get(
+    "/healthz",
+    tags=["system"],
+    summary="Liveness — is the process up",
+    description=(
+        "Answers as long as the process can serve. Deliberately does NOT touch "
+        "the engine: a liveness probe that fails when a dependency is degraded "
+        "causes a restart loop that fixes nothing."
+    ),
+)
+def healthz() -> dict[str, object]:
+    return {"status": "ok", "uptime_seconds": round(time.time() - STARTED_AT, 1)}
+
+
+@app.get(
+    "/readyz",
+    tags=["system"],
+    summary="Readiness — can the service do useful work",
+    description=(
+        "Checks that the engine bindings are importable. Distinct from "
+        "liveness: a process that is up but cannot reach the engine should "
+        "stop receiving traffic without being restarted."
+    ),
+)
+def readyz() -> dict[str, object]:
+    from .dependencies import get_engine
+
+    try:
+        get_engine()
+    except Exception as exc:  # noqa: BLE001 - reported, not raised
+        return {"ready": False, "detail": str(exc)}
+    return {"ready": True, "detail": ""}
+
+
+@app.get(
+    "/buildz",
+    tags=["system"],
+    summary="Build and deployment metadata",
+    description=(
+        "What is actually running: engine version, commit, environment and "
+        "market provider. The first question after a bad deploy is 'which "
+        "build is live', and guessing is how the wrong thing gets rolled back."
+    ),
+)
+def buildz() -> dict[str, object]:
+    engine_version = "unavailable"
+    try:
+        from .dependencies import get_engine
+
+        engine_version = str(get_engine().version().get("engine_version"))
+    except Exception:  # noqa: BLE001 - the endpoint must still answer
+        pass
+    return {
+        "engine_version": engine_version,
+        "gateway_version": system.GATEWAY_VERSION,
+        "commit": os.environ.get("PTL_COMMIT", "unknown"),
+        "built_at": os.environ.get("PTL_BUILT_AT", "unknown"),
+        "environment": settings.environment,
+        "market_provider": settings.market_provider,
+    }
+
+
 @app.get("/", tags=["system"], summary="Service banner")
 def root() -> dict[str, str]:
     return {
         "service": "predictive-trading-lab-api",
         "docs": "/docs",
         "openapi": "/openapi.json",
-        "phase": "P9 (live market data)",
+        "phase": "P11 (production deployment)",
     }

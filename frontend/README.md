@@ -39,6 +39,26 @@ These held through every phase and are enforced by tests:
 | React performs no business logic | The client plots and sends intent; every statistic comes from the engine |
 | Replay determinism | Fingerprints unchanged since v1.0: `config 30b44e5972450aad` |
 
+## Quick start with Docker
+
+From the repository root — the backend build context is the root, because the
+bindings compile against the engine:
+
+```bash
+docker compose -f frontend/docker-compose.yml up --build
+```
+
+Web on http://localhost:3000, gateway on http://localhost:8000.
+
+## Deployment
+
+Frontend on Vercel, backend on Render. Full instructions, environment variables
+and troubleshooting: [DEPLOYMENT.md](DEPLOYMENT.md).
+
+**The backend runs as a single instance by design.** The paper session lives in
+memory with one writer thread, so a second replica would be a second session.
+Scaling means redesigning session ownership, not raising a replica count.
+
 ## Build
 
 The engine builds with no Python, Node or frontend dependency:
@@ -92,6 +112,34 @@ built to prevent:
 
 The emergency sequence is flatten, then halt, then stop.
 
+## Configuration
+
+Every deployment-specific value is an environment variable, listed in
+[`.env.example`](.env.example) and validated at startup — the gateway refuses to
+start on a bad configuration rather than serving errors that look healthy to a
+load balancer.
+
+`NEXT_PUBLIC_API_BASE` is inlined at **build** time. Changing the API URL needs
+a redeploy, not a restart.
+
+## Roadmap
+
+- Journal manual commands against event indices, making a human-driven session
+  fully replayable
+- Bind the engine's trade matching so the blotter can show MAE/MFE
+- Verify the Alpaca live feed against a real endpoint
+- Close ADR-0001's market data entitlement
+
+## Contributing
+
+See the engine's [CONTRIBUTING.md](../CONTRIBUTING.md). The frontend follows the
+same bar: a test whose name states the property, comments that explain why, and
+no second implementation of anything the engine already computes.
+
+## License
+
+See [LICENSE](../LICENSE) at the repository root.
+
 ## Known limitations
 
 - **Market data is a deterministic synthetic replay**, labelled `synthetic-replay`
@@ -103,6 +151,10 @@ The emergency sequence is flatten, then halt, then stop.
   deterministic — manual requests FIFO, then strategy orders — but which bar a
   human's order lands on depends on wall-clock arrival. Full replay of a manual
   session would require journalling commands against event indices.
+- **The backend is stateful and single-instance.** Sessions do not survive a
+  restart unless a disk is attached at `PTL_RESULTS`.
+- **Docker images have not been built in this environment** — no Docker daemon
+  was available. The Dockerfiles are written and reviewed but unproven.
 - **Some API endpoints have no UI.** Persisted artifacts, diagnostics, metrics
   and reports are available to programmatic clients and documented in the
   OpenAPI schema; no screen consumes them.

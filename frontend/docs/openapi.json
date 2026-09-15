@@ -1525,6 +1525,78 @@
         }
       }
     },
+    "/healthz": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Liveness \u2014 is the process up",
+        "description": "Answers as long as the process can serve. Deliberately does NOT touch the engine: a liveness probe that fails when a dependency is degraded causes a restart loop that fixes nothing.",
+        "operationId": "healthz_healthz_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Healthz Healthz Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/readyz": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Readiness \u2014 can the service do useful work",
+        "description": "Checks that the engine bindings are importable. Distinct from liveness: a process that is up but cannot reach the engine should stop receiving traffic without being restarted.",
+        "operationId": "readyz_readyz_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Readyz Readyz Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/buildz": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Build and deployment metadata",
+        "description": "What is actually running: engine version, commit, environment and market provider. The first question after a bad deploy is 'which build is live', and guessing is how the wrong thing gets rolled back.",
+        "operationId": "buildz_buildz_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Buildz Buildz Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/": {
       "get": {
         "tags": [

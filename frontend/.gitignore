@@ -1,0 +1,21 @@
+# Deployment secrets. The example is committed; a filled-in .env never is.
+.env
+.env.local
+.env.*.local
+
+# Build output
+web/.next/
+web/out/
+web/node_modules/
+web/*.tsbuildinfo
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+coverage.xml
+reports/
+
+# Session artifacts written at runtime
+backend/results/

@@ -1,0 +1,130 @@
+# Production CI for the frontend and gateway.
+#
+# INSTALL AT .github/workflows/frontend-ci.yml. It lives here because P11 keeps
+# every change inside frontend/, and the repository root is not ours to modify.
+# Copying it is the one manual step, and the deployment guide says so.
+#
+# The engine's own CI is unchanged and still runs separately.
+
+name: frontend-ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  backend:
+    name: Gateway and bindings
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libeigen3-dev ninja-build
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies
+        run: pip install -r frontend/backend/requirements.txt
+
+      # The bindings compile against the engine, so the C++ build runs first.
+      # Without it the whole backend suite skips its integration tests and the
+      # job would pass while proving much less.
+      - name: Build bindings
+        run: |
+          cmake -S frontend/backend/bindings -B build/bindings -G Ninja \
+                -DCMAKE_BUILD_TYPE=Release \
+                -Dpybind11_DIR="$(python3 -c 'import pybind11; print(pybind11.get_cmake_dir())')"
+          cmake --build build/bindings
+
+      - name: Backend tests
+        env:
+          PYTHONPATH: build/bindings/lib
+        run: |
+          pip install pytest-cov
+          python -m pytest frontend/backend -q \
+            --junitxml=reports/backend-junit.xml \
+            --cov=frontend/backend/app --cov-report=xml:reports/coverage.xml
+
+      - name: Generate OpenAPI
+        env:
+          PYTHONPATH: build/bindings/lib
+        run: |
+          python - <<'PY'
+          import json, pathlib, sys
+          sys.path.insert(0, "frontend/backend")
+          from app.main import app
+          pathlib.Path("reports").mkdir(exist_ok=True)
+          spec = app.openapi()
+          pathlib.Path("reports/openapi.json").write_text(json.dumps(spec, indent=2))
+          # A missing summary means an endpoint a client author must read the
+          # source to use, so it fails the build rather than being noticed later.
+          missing = [f"{v} {p}" for p, ops in spec["paths"].items()
+                     for v, op in ops.items() if not op.get("summary")]
+          assert not missing, f"endpoints without a summary: {missing}"
+          print(f"OpenAPI: {len(spec['paths'])} paths")
+          PY
+
+      - name: Determinism
+        env:
+          PYTHONPATH: build/bindings/lib
+        run: |
+          python - <<'PY'
+          import ptl
+          assert ptl.rng_fingerprint(20240101, 3) == [
+              "d05ef55272cdfb14", "2e2f422341add64e", "1c120f3d1ce63170"]
+          assert ptl.config_hash("config/base.toml") == "30b44e5972450aad"
+          print("determinism fingerprints match the v1.0 reference")
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backend-reports
+          path: reports/
+
+  web:
+    name: Web
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install
+      - name: TypeScript
+        run: npx tsc --noEmit
+      - name: Tests
+        run: npm test
+      - name: Build
+        run: npm run build
+
+  docker:
+    name: Docker images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Built but not pushed: the point is that the image assembles, and a
+      # registry credential is not something CI should need to prove that.
+      - name: Backend image
+        run: docker build -f frontend/backend/Dockerfile -t ptl-backend:ci .
+      - name: Frontend image
+        run: docker build -f frontend/web/Dockerfile -t ptl-web:ci frontend/web
+      - name: Backend image starts and becomes ready
+        run: |
+          docker run -d --name ptl-ci -p 8000:8000 \
+            -e PTL_ENV=development ptl-backend:ci
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8000/readyz | grep -q '"ready": *true'; then
+              echo "ready"; docker logs ptl-ci; exit 0
+            fi
+            sleep 2
+          done
+          echo "never became ready"; docker logs ptl-ci; exit 1
