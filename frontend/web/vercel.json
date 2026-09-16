@@ -13,16 +13,22 @@
       ]
     },
     {
-      "//": "Immutable build assets are safe to cache forever; they are content-hashed.",
       "source": "/_next/static/(.*)",
       "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
       ]
     },
     {
-      "//": "Pages must NOT be cached: every one renders live account state, and a cached dashboard would show a stale book as current.",
       "source": "/((?!_next/static).*)",
-      "headers": [{ "key": "Cache-Control", "value": "no-store" }]
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store"
+        }
+      ]
     }
   ]
 }
